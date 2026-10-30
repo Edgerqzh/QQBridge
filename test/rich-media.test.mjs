@@ -9,6 +9,7 @@ import { receivedSegments } from '../src/native/received-segments.mjs';
 import { recallMessage } from '../src/native/recall.mjs';
 import { createMessageMapper } from '../src/native/messages.mjs';
 import { createReceivedMediaCache } from '../src/native/media-cache.mjs';
+import { prepareNativePicture } from '../src/native/picture-paths.mjs';
 
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==','base64');
 async function store(t, options = {}) {
@@ -22,6 +23,11 @@ test('managed media is content addressed with hashes and does not accept server 
   assert.deepEqual(imageInfo(png), { extension: 'png', type: 1001, width: 1, height: 1 });
   const second = await media.prepare('qqbridge://' + first.sha256, 'image');
   assert.equal(first.sourcePath, second.sourcePath);
+  assert.ok(first.sourcePath.endsWith('.png'));
+  for (const side of [198,720]) {
+    const thumbnail = await readFile(first.thumbPaths.get(side));
+    assert.equal(imageInfo(thumbnail).extension, 'jpg');
+  }
   assert.deepEqual(await readFile(first.sourcePath), png);
   for (const value of ['/etc/passwd','file:///etc/passwd','http://127.0.0.1/','https://example.com/a.png','qqbridge://../../secret','base64://bad!!!'])
     await assert.rejects(media.prepare(value, 'image'), error => error.retcode === 1400);
@@ -35,6 +41,24 @@ test('media validates decoded byte limits, dimensions, names and voice codec bef
   await assert.rejects(other.prepare('base64://' + corrupted.toString('base64'), 'image'));
   await assert.rejects(other.prepare('base64://eA==','file','../a'));
   await assert.rejects(other.prepare('base64://' + Buffer.from('RIFF wav').toString('base64'),'record'));
+});
+test('pictures are staged by MD5 into SDK Ori and Thumb paths and cannot escape the profile', async t => {
+  const { directory, media } = await store(t);
+  const original = await media.prepare('base64://' + png.toString('base64'), 'image');
+  const msgService = { getRichMediaFilePathForMobileQQSend(input) {
+    assert.equal(input.needCreate, false);
+    return path.join(directory, input.downloadType === 1 ? 'Ori' : 'Thumb',
+      input.md5HexStr + (input.downloadType === 1 ? '' : '_' + input.thumbSize) + '.png');
+  } };
+  const staged = await prepareNativePicture({ msgService, profile: directory, media: original });
+  assert.equal(path.basename(path.dirname(staged.sourcePath)), 'Ori');
+  assert.equal(staged.fileName, original.md5 + '.png');
+  assert.deepEqual(await readFile(staged.sourcePath), png);
+  for (const side of [198,720]) {
+    assert.equal(path.basename(path.dirname(staged.thumbPaths.get(side))), 'Thumb');
+    assert.equal(imageInfo(await readFile(staged.thumbPaths.get(side))).extension, 'jpg');
+  }
+  await assert.rejects(prepareNativePicture({ msgService: { getRichMediaFilePathForMobileQQSend: () => process.execPath }, profile: directory, media: original }), error => error.retcode === 1503);
 });
 test('received media retrieval is group scoped, profile confined and bounded', async t => {
   const { directory } = await store(t);

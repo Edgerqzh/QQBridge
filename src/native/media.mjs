@@ -77,7 +77,25 @@ export function createMediaStore({ directory, maxBytes = 16 * 1024 * 1024 }) {
       const sourcePath = path.join(root, sha256 + (kind === 'image' ? '.' + info.extension : ''));
       try { await writeFile(sourcePath, bytes, { flag: 'wx', mode: 0o600 }); }
       catch (error) { if (error.code !== 'EEXIST') throw error; }
+      const thumbPaths = new Map(); let thumbSize = 0;
+      if (kind === 'image') {
+        const { default: sharp } = await import('sharp');
+        for (const side of [198, 720]) {
+          let thumbnail;
+          try {
+            thumbnail = await sharp(bytes, { limitInputPixels: 40000000, failOn: 'error' })
+              .resize({ width: side, height: side, fit: 'inside', withoutEnlargement: true })
+              .jpeg({ quality: 80 }).toBuffer();
+          } catch { throw fail('Image decoding or thumbnail generation failed.'); }
+          const thumbnailPath = path.join(root, `${sha256}.${side}.jpg`);
+          try { await writeFile(thumbnailPath, thumbnail, { flag: 'wx', mode: 0o600 }); }
+          catch (error) { if (error.code !== 'EEXIST') throw error; }
+          thumbPaths.set(side, thumbnailPath);
+          if (side === 720) thumbSize = thumbnail.length;
+        }
+      }
       return { fileName, sourcePath, size: String(bytes.length), md5, sha256,
+        thumbPaths, thumbSize,
         sha1: createHash('sha1').update(bytes).digest('hex'),
         md5Ten: createHash('md5').update(bytes.subarray(0, 10*1024*1024)).digest('hex'), ...info };
     },

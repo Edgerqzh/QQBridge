@@ -9,6 +9,7 @@ import { createMediaStore } from './media.mjs';
 import { buildGroupSegments, resolveGroupUid } from './segments.mjs';
 import { recallMessage } from './recall.mjs';
 import { createReceivedMediaCache } from './media-cache.mjs';
+import { prepareNativePicture } from './picture-paths.mjs';
 
 const failure = (message, retcode = 1503) => Object.assign(new Error(message), { retcode });
 const validUin = value => typeof value === 'string' && /^[1-9]\d{4,11}$/.test(value) && Number.isSafeInteger(Number(value));
@@ -403,7 +404,8 @@ export function createDriverCore({
         try {
           message = rich ? await Promise.race([
             buildGroupSegments({ groupId: group, message: segments, autoEscape: params.auto_escape,
-              mediaStore, resolveUid: uin => resolveGroupUid(services.groupService, uin) }),
+              mediaStore, resolveUid: uin => resolveGroupUid(services.groupService, uin),
+              prepareImage: media => prepareNativePicture({ msgService: services.msgService, profile, media }) }),
             new Promise((_, reject) => { preparationTimer = setTimeout(() => reject(failure('Media preparation timed out; no send was attempted.', 1504)), sendTimeoutMs); }),
           ]) : null;
         } finally { clearTimeout(preparationTimer); }

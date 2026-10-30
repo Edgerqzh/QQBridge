@@ -1,5 +1,5 @@
 const fail = (message, retcode = 1400) => Object.assign(new Error(message), { retcode });
-export async function buildGroupSegments({ groupId, message, autoEscape, mediaStore, resolveUid }) {
+export async function buildGroupSegments({ groupId, message, autoEscape, mediaStore, resolveUid, prepareImage }) {
   if (autoEscape !== undefined && typeof autoEscape !== 'boolean') throw fail('auto_escape must be boolean.');
   if (typeof message === 'string') {
     if (autoEscape !== true && message.includes('[CQ:')) throw fail('CQ parsing is unsupported; use message segment arrays.', 1404);
@@ -24,11 +24,12 @@ export async function buildGroupSegments({ groupId, message, autoEscape, mediaSt
       } });
     } else if (['image', 'file', 'record'].includes(segment.type)) {
       if (!mediaStore) throw fail('Media storage is unavailable.', 1503);
-      const m = await mediaStore.prepare(data.file, segment.type, data.name);
+      let m = await mediaStore.prepare(data.file, segment.type, data.name);
+      if (segment.type === 'image' && prepareImage) m = await prepareImage(m);
       if (segment.type === 'image') elements.push({ elementType: 2, elementId: '0', picElement: {
         picSubType: 0, picSubSubType: 0, fileName: m.fileName, fileSize: m.size,
         picWidth: m.width, picHeight: m.height, original: true, md5HexStr: m.md5,
-        sourcePath: m.sourcePath, thumbPath: new Map(), picType: m.type,
+        sourcePath: m.sourcePath, thumbPath: m.thumbPaths, thumbFileSize: m.thumbSize, picType: m.type,
       } });
       if (segment.type === 'file') elements.push({ elementType: 3, elementId: '0', fileElement: {
         fileName: m.fileName, filePath: m.sourcePath, fileSize: m.size,
