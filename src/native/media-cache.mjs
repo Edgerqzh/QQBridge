@@ -18,6 +18,8 @@ export function createReceivedMediaCache({ profile, capacity = 5000, getMsgServi
       const saved=JSON.parse(await readFile(file,'utf8'));if(current!==generation||account!==accountKey()||!Array.isArray(saved))return;
       for(const pair of saved.slice(-capacity)){if(!Array.isArray(pair)||pair.length!==2)continue;const [id,e]=pair;
         if(typeof id!=='string'||!e||typeof e!=='object'||typeof e.group!=='string'||!/^[1-9]\d{0,15}$/.test(e.group))continue;
+        if(e.chatType!==undefined&&![1,2].includes(e.chatType))continue;
+        if(e.chatType===1&&(!/^[1-9]\d{4,11}$/.test(e.group)||!/^u_[A-Za-z0-9_-]{1,126}$/.test(e.peerUid)))continue;
         if(!entries.has(id)&&entries.size<capacity)entries.set(id,e);
       }
     }catch{}})();return loadPromise;
@@ -52,7 +54,7 @@ export function createReceivedMediaCache({ profile, capacity = 5000, getMsgServi
   }
   function check(entry,id,allowed,current,signal) {
     if(signal?.aborted||current!==generation||entries.get(id)!==entry)throw fail('Media operation was cancelled.');
-    if(!allowed(entry.group))throw fail('Media group is unavailable or not allowed.',1403);
+    if(!allowed(entry.group,entry.chatType??2,entry.peerUid))throw fail('Media conversation is unavailable or not allowed.',1403);
   }
   async function download(entry,id,allowed,current,signal) {
     check(entry,id,allowed,current,signal);
@@ -66,7 +68,7 @@ export function createReceivedMediaCache({ profile, capacity = 5000, getMsgServi
     if(!inside(root,await realpath(dir)))throw fail('Invalid download storage directory.',1403);
     const target=path.join(dir,randomUUID()+'.media');
     const candidate={...entry,source:target}; let success=false,dispatched=false,cancelled=false;
-    const request={msgId:entry.msgId,peerUid:entry.peerUid,chatType:2,elementId:entry.elementId,
+    const request={msgId:entry.msgId,peerUid:entry.peerUid,chatType:entry.chatType??2,elementId:entry.elementId,
       downloadType:1,thumbSize:0,filePath:target,fileModelId:'',downSourceType:0,triggerType:1,downloadScene:0};
     const cancel=()=>{if(dispatched&&!cancelled&&typeof service.cancelGetRichMediaElement==='function'){cancelled=true;try{Promise.resolve(service.cancelGetRichMediaElement(request)).catch(()=>{});}catch{}}};
     signal.addEventListener('abort',cancel,{once:true});
@@ -80,8 +82,11 @@ export function createReceivedMediaCache({ profile, capacity = 5000, getMsgServi
       if(ack!==undefined&&(!ack||ack.result!==0))throw fail('QQ rejected the media download (code '+(Number.isInteger(ack?.result)?ack.result:'unknown')+').',1502);
       while(true) {
         check(entry,id,allowed,current,signal);
-        const bytes=await inspect(candidate);
-        if(bytes){entry.source=target;persist();success=true;metrics.completed++;return bytes;}
+        let bytes=await inspect(candidate),source=target;
+        // Private-media downloads can finish in the SDK's reported cache path.
+        // Both locations must pass identical confinement and integrity checks.
+        if(!bytes&&entry.source!==target){bytes=await inspect(entry);source=entry.source;}
+        if(bytes){entry.source=source;persist();success=true;metrics.completed++;if(source!==target)await unlink(target).catch(()=>{});return bytes;}
         await delay(pollMs,undefined,{signal}).catch(()=>{throw fail('Media download was cancelled.');});
       }
     } finally { signal.removeEventListener('abort',cancel);if(!success){cancel();await unlink(target).catch(()=>{});} }
@@ -91,14 +96,17 @@ export function createReceivedMediaCache({ profile, capacity = 5000, getMsgServi
       for (const element of record.elements ?? []) {
         const value = element.picElement ?? element.fileElement ?? element.pttElement;
         if (!value || ![2,3,4].includes(element.elementType)) continue;
-        const id = [value.fileUuid,value.md5HexStr,value.fileMd5].find(v=>typeof v==='string'&&v.length>0&&v.length<=512&&!/[\\/\u0000-\u001f]/.test(v));
-        if (typeof id !== 'string' || !id.length || id.length > 512 || /[\\/\u0000-\u001f]/.test(id)) continue;
+        const nativeId = [value.fileUuid,value.md5HexStr,value.fileMd5].find(v=>typeof v==='string'&&v.length>0&&v.length<=512&&!/[\\/\u0000-\u001f]/.test(v));
+        if (!nativeId) continue;
+        const chatType=record.chatType===1?1:2;
+        if(chatType===1&&(!/^[1-9]\d{4,11}$/.test(record.peerUin)||!/^u_[A-Za-z0-9_-]{1,126}$/.test(record.peerUid)))continue;
+        const id=chatType===1?`private:${record.peerUin}:${nativeId}`:nativeId;
         const group=String(record.peerUin),old=entries.get(id);
-        if(old&&old.group===group&&old.msgId===record.msgId)continue;
+        if(old&&old.group===group&&old.msgId===record.msgId&&(old.chatType??2)===chatType)continue;
         if (!entries.has(id) && entries.size >= capacity) {const first=entries.keys().next().value;jobs.get(first)?.controller.abort();entries.delete(first);}
         jobs.get(id)?.controller.abort();
         const size=Number(value.fileSize),md5=value.md5HexStr||value.fileMd5;
-        entries.set(id, { group, source: value.sourcePath || value.filePath, name:value.fileName, type:element.elementType,
+        entries.set(id, { group, chatType, source: value.sourcePath || value.filePath, name:value.fileName, type:element.elementType,
           msgId:record.msgId,peerUid:record.peerUid||group,elementId:element.elementId,
           size:Number.isSafeInteger(size)&&size>0?size:null,md5:typeof md5==='string'&&/^[a-fA-F0-9]{32}$/.test(md5)?md5.toLowerCase():null });
       }

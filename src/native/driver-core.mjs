@@ -15,6 +15,8 @@ import { createMessageIndex } from './message-index.mjs';
 import { createContextActions, messageAlias } from './context-actions.mjs';
 import { createNoticeMapper } from './notices.mjs';
 import { createRecoveryController } from './recovery.mjs';
+import { createFriendActions } from './friends.mjs';
+import { createPrivateActions } from './private-actions.mjs';
 
 const failure = (message, retcode = 1503) => Object.assign(new Error(message), { retcode });
 const validUin = value => typeof value === 'string' && /^[1-9]\d{4,11}$/.test(value) && Number.isSafeInteger(Number(value));
@@ -24,11 +26,11 @@ function groupId(value) {
   return typeof value === 'string' && /^[1-9]\d{0,15}$/.test(value) && Number.isSafeInteger(Number(value)) ? value : null;
 }
 
-export function parseAllowedGroups(value) {
+export function parseAllowedGroups(value, label='QQBRIDGE_ALLOWED_GROUPS') {
   if (value === undefined || value === '') return undefined;
-  if (typeof value !== 'string') throw new TypeError('QQBRIDGE_ALLOWED_GROUPS must be comma-separated group IDs.');
+  if (typeof value !== 'string') throw new TypeError(`${label} must be comma-separated QQ IDs.`);
   const ids = value.split(',').map(item => item.trim());
-  if (ids.some(item => !groupId(item))) throw new TypeError('QQBRIDGE_ALLOWED_GROUPS contains an invalid group ID.');
+  if (ids.some(item => !groupId(item))) throw new TypeError(`${label} contains an invalid QQ ID.`);
   return new Set(ids);
 }
 
@@ -50,7 +52,7 @@ function plainText(params) {
  * Dependencies can be injected in tests; there is no environment mock switch. */
 export function createDriverCore({
   native, metadata, profile, prepareProfile, emitEvent = () => {}, emitStatus = () => {},
-  allowedGroups, loginUin = '', experimentalRichMedia = false, createSession = createLinuxSession, createIndex = createMessageIndex, persistSelectedAccount = async () => {},
+  allowedGroups, allowedUsers, loginUin = '', experimentalRichMedia = false, createSession = createLinuxSession, createIndex = createMessageIndex, persistSelectedAccount = async () => {},
   connectionTimeoutMs = 10000, qrTimeoutMs = 12000, accountTimeoutMs = 12000, sendTimeoutMs = 12000,
   requestRestart = () => {}, recoveryGraceMs = 15000, forceQr = false, manualRecoveryReason = '',
 }) {
@@ -95,6 +97,21 @@ export function createDriverCore({
     },
   });
   const accountActions = createAccountActions({ getSession: () => session, getAccount: () => selectedAccount, timeoutMs: accountTimeoutMs });
+  if(allowedUsers!==undefined&&!Array.isArray(allowedUsers)&&!(allowedUsers instanceof Set))throw new TypeError('allowedUsers must be an array or Set.');
+  const userAllow=allowedUsers===undefined?undefined:new Set([...allowedUsers].map(String));
+  if(userAllow&&[...userAllow].some(id=>!validUin(id)))throw new TypeError('Invalid allowed private user ID.');
+  function privateContext(){
+    if(!session||!selectedAccount||!status().online)throw failure('QQ private session is offline.');
+    const activeSession=session,current=generation,activeMapper=mapper,activeIndex=messageIndex,account={...selectedAccount};
+    return {session:activeSession,services:activeSession.getServices(),account,mapper:activeMapper,friends:friendActions,
+      rememberMedia(record){if(experimentalRichMedia)receivedMedia.remember(record);},flush:()=>activeIndex.flush(),
+      check(friend){
+        if(current!==generation||session!==activeSession||!status().online)throw failure('Private account session changed.');
+        if(friend){const latest=friendActions.lookup(friend.uin);if(!latest||latest.uid!==friend.uid)throw failure('Private friend is unavailable or not allowed.',1403);}
+      }};
+  }
+  const friendActions=createFriendActions({getContext:privateContext,allowedUsers:userAllow,timeoutMs:Math.min(accountTimeoutMs,8000)});
+  const privateActions=createPrivateActions({getContext:privateContext,timeoutMs:Math.min(accountTimeoutMs,8000)});
   const contextActions = createContextActions({ timeoutMs: Math.min(accountTimeoutMs, 8000), getContext() {
     if (!mapper || !messageIndex || !session || !status().online) throw failure('QQ account message session is offline.');
     const activeMapper = mapper, activeIndex = messageIndex, activeSession = session, current = generation;
@@ -127,6 +144,7 @@ export function createDriverCore({
   }
   function clearAccount() {
     receivedMedia.clear();
+    friendActions.invalidate();
     noticeMapper?.close();
     generation++; selectedAccount = null; mapper = null; membership.clear(); groupListObserved = false; deferredGroups = null;
     rememberedSelection = false; userLoggedInUin = null;
@@ -243,7 +261,7 @@ export function createDriverCore({
       const index = createIndex({ profile, accountId: account.uin, snapshot: () => activeMapper.snapshot() });
       const savedMessages = await index.load();
       if (stopped || current !== generation) return;
-      const activeMapper = createMessageMapper({ selfId: account.uin, allowedGroups: allow, richMedia: experimentalRichMedia, initialState: savedMessages, onChange: () => index.changed() });
+      const activeMapper = createMessageMapper({ selfId: account.uin, allowedGroups: allow, privateMessages: true, richMedia: experimentalRichMedia, initialState: savedMessages, onChange: () => index.changed() });
       messageIndex = index; mapper = activeMapper;
       const isCurrent = () => !stopped && current === generation && selectedAccount?.uin === account.uin && selectedAccount?.uid === account.uid;
       const checkCurrent = () => { if (!isCurrent() || !status().online) throw failure('Notice account session changed.'); };
@@ -270,13 +288,15 @@ export function createDriverCore({
         if (!isCurrent() || !Array.isArray(records) || !status().online) return;
         for (const record of records) {
           const group = groupId(record?.peerUin);
-          if (record?.chatType !== 2 || !group || (allow && !allow.has(group))) continue;
+          const direct=record?.chatType===1;
+          if ((!direct&&record?.chatType!==2) || !group || (!direct&&allow&&!allow.has(group))) continue;
           if (queuedEvents >= 2500) { observerFailed = true; notify(); continue; }
           queuedEvents++;
           eventTail = eventTail.catch(() => {}).then(async () => {
             try {
               checkCurrent();
-              const notices = await activeNotices.fromRecord(record);
+              if(direct){await friendActions.load();checkCurrent();const friend=friendActions.lookup(group);if(!friend||friend.uid!==record.peerUid)return;}
+              const notices = direct ? await privateActions.notices(record) : await activeNotices.fromRecord(record);
               if (notices.length) {
                 await index.flush(); checkCurrent();
                 for (const notice of notices) {
@@ -288,9 +308,11 @@ export function createDriverCore({
                 return;
               }
               if (updateOnly) return;
-              if (experimentalRichMedia && membership.has(group)) await contextActions.hydrateReplies(record);
+              let effectiveRecord=record;
+              if(experimentalRichMedia&&direct)effectiveRecord=await privateActions.hydrate(record);
+              else if (experimentalRichMedia && membership.has(group)) await contextActions.hydrateReplies(record);
               checkCurrent();
-              const event = activeMapper.fromNative(record);
+              const event = activeMapper.fromNative(effectiveRecord);
               if (!event) return;
               if (experimentalRichMedia) receivedMedia.remember(record);
               await index.flush(); checkCurrent(); emitEvent(event);
@@ -316,6 +338,7 @@ export function createDriverCore({
           if (wasOnline && !online) {
             previousMembership = new Set(membership); membership.clear(); groupListObserved = false;
             accountActions.invalidate(); activeNotices.invalidate();
+            friendActions.invalidate();
           }
           if (!wasOnline && online && everOnline) {
             queueMicrotask(() => {
@@ -323,6 +346,7 @@ export function createDriverCore({
               try { Promise.resolve(session.getServices().groupService.getGroupList(true)).catch(() => {}); } catch {}
             });
           }
+          if(!wasOnline&&online)queueMicrotask(()=>{if(isCurrent())friendActions.load(true).catch(()=>{});});
           wasOnline = online;
           everOnline ||= online;
           recovery.observe({ online, sessionReady: state.session_ready === true, reason: 'msf_disconnected' });
@@ -338,6 +362,7 @@ export function createDriverCore({
           queueRecords(records);
         },
         onMessageUpdate: records => queueRecords(records, true),
+        onFriendList(rows){if(isCurrent())friendActions.update(rows);},
         onAuthenticationRequired(reason) {
           if (!isCurrent()) return;
           loginFailed = true; transportInvalidated = true; stage = 'authentication_required';
@@ -468,7 +493,7 @@ export function createDriverCore({
     if (login.connect() === false) throw failure('QQ native login transport refused to connect.');
   }
   return {
-    actions: Object.freeze(['get_login_qrcode', 'get_login_state', 'get_login_info', 'get_group_list', 'send_group_msg', 'upload_group_file', 'delete_msg', 'get_file', 'get_record', 'convert_record', 'get_msg', 'get_group_msg_history', 'get_group_member_list', 'get_group_member_info']), status,
+    actions: Object.freeze(['get_login_qrcode', 'get_login_state', 'get_login_info', 'get_group_list', 'send_group_msg', 'upload_group_file', 'delete_msg', 'get_file', 'get_record', 'convert_record', 'get_msg', 'get_group_msg_history', 'get_group_member_list', 'get_group_member_info', 'get_friend_list', 'get_friend_info', 'get_stranger_info', 'send_private_msg', 'send_msg', 'get_friend_msg_history', 'get_private_msg_history', 'upload_private_file']), status,
     start() {
       if (stopped) return Promise.reject(failure('QQ native driver is stopped.'));
       if (!startPromise) startPromise = startNative().catch(error => { loginFailed = true; stage = 'start_failed'; notify(); throw error; });
@@ -483,8 +508,33 @@ export function createDriverCore({
         qr_failure: qrFailure, saved_selection_error: selectionSaveFailed, media_downloads: receivedMedia.status(), audio: audio.status(),
         message_index: messageIndex?.status() ?? null, context_reads: contextActions.status(),
         notices: noticeMapper?.status() ?? null, recovery: { ...recovery.status(), manual_reason: manualRecoveryReason || null },
+        friends:friendActions.status(),private_reads:privateActions.status(),
         remembered_login: { configured: Boolean(loginUin), selected_via_cache: rememberedSelection, lookup_reads: rememberedReads, lookup_pending: rememberedBusy, lookup_limit: maxRememberedReads },
       };
+      if(action==='send_msg'){
+        const type=params.message_type??(params.group_id!==undefined&&params.user_id===undefined?'group':params.user_id!==undefined&&params.group_id===undefined?'private':null);
+        if(!['group','private'].includes(type)||type==='group'&&params.user_id!==undefined||type==='private'&&params.group_id!==undefined)throw failure('send_msg needs one unambiguous group or private target.',1400);
+        action=type==='group'?'send_group_msg':'send_private_msg';
+      }
+      if(action==='get_friend_list')return friendActions.list();
+      if(action==='get_friend_info'||action==='get_stranger_info')return friendActions.info(params.user_id);
+      if(action==='get_friend_msg_history'||action==='get_private_msg_history')return privateActions.call(action,params);
+      if(action==='get_msg'&&mapper?.lookup(messageAlias(params.message_id))?.chatType===1)return privateActions.call(action,params);
+      if(action==='send_private_msg'||action==='upload_private_file'){
+        const c=privateContext();const friend=await friendActions.resolve(params.user_id,{refresh:true});c.check(friend);
+        const segments=action==='upload_private_file'?[{type:'file',data:{file:params.file,name:params.name}}]:params.message;
+        if(Array.isArray(segments)&&segments.some(s=>s?.type!=='text')&&!experimentalRichMedia)throw failure('Experimental rich media is disabled.',1404);
+        const deadline=Date.now()+sendTimeoutMs;let timer,message;
+        try{message=await Promise.race([buildGroupSegments({groupId:friend.uin,peer:{chatType:1,peerUid:friend.uid,guildId:''},message:segments,autoEscape:params.auto_escape,mediaStore,
+          prepareImage:m=>prepareNativePicture({msgService:c.services.msgService,profile,media:m}),resolveReply:async id=>(await privateActions.getRecord(id,friend)).record}),
+          new Promise((_,reject)=>{timer=setTimeout(()=>reject(failure('Private message preparation timed out; no send attempted.',1504)),sendTimeoutMs);})]);}finally{clearTimeout(timer);}
+        c.check(friend);const remaining=deadline-Date.now();if(remaining<=0)throw failure('Private preparation deadline exceeded.',1504);
+        const result=await sendElements({msgService:c.services.msgService,message,timeoutMs:remaining});let alias;
+        try{alias=c.mapper.rememberNative({chatType:1,peerUin:friend.uin,peerUid:friend.uid,senderUin:c.account.uin,msgId:result.native_id});if(!alias)throw new Error();await c.flush();}
+        catch{throw failure('QQ accepted the private message but its ID could not be persisted. Do not resend.',1500);}
+        try{c.check(friend);}catch{throw failure('QQ accepted the private message but its session changed. Do not resend.',1500);}
+        return {message_id:alias};
+      }
       if (['get_msg', 'get_group_msg_history', 'get_group_member_list', 'get_group_member_info'].includes(action)) return contextActions.call(action, params);
       if (action === 'get_login_info' || action === 'get_group_list') {
         if (loginFailed || !transportConnected) throw failure('QQ account session is unavailable.');
@@ -502,7 +552,8 @@ export function createDriverCore({
         if (!experimentalRichMedia) throw failure('Experimental media is disabled.', 1404);
         if (!status().online) throw failure('QQ account message session is offline.');
         const current = generation, deadline = Date.now() + 12000;
-        const result = await receivedMedia.read(params.file_id ?? params.file, group => membership.has(group) && (!allow || allow.has(group)));
+        const file=params.file_id??params.file;if(typeof file==='string'&&file.startsWith('private:'))await friendActions.load();
+        const result = await receivedMedia.read(file, (peer,type,uid) => type===1 ? friendActions.lookup(peer)?.uid===uid : membership.has(peer) && (!allow || allow.has(peer)));
         if (current !== generation || !status().online) throw failure('Account session changed while reading media.');
         if (action === 'get_record') {
           const converted = await audio.convert(Buffer.from(result.base64,'base64'), params.out_format ?? 'wav', { timeoutMs: Math.max(1,deadline-Date.now()) });
@@ -516,7 +567,8 @@ export function createDriverCore({
         if (!status().online) throw failure('QQ account message session is offline.');
         const message = mapper?.lookup(messageAlias(params.message_id));
         if (!message) throw failure('Message ID is invalid or expired.', 1400);
-        if ((allow && !allow.has(message.peerUin)) || !membership.has(message.peerUin)) throw failure('Message group is unavailable or not allowed.', 1403);
+        if(message.chatType===1){const friend=await friendActions.resolve(message.peerUin,{refresh:true});if(friend.uid!==message.peerUid)throw failure('Private peer is unavailable.',1403);}
+        else if ((allow && !allow.has(message.peerUin)) || !membership.has(message.peerUin)) throw failure('Message group is unavailable or not allowed.', 1403);
         return recallMessage({ msgService: session.getServices().msgService, metadata: message, timeoutMs: sendTimeoutMs });
       }
       if (action === 'send_group_msg' || action === 'upload_group_file') {
@@ -585,7 +637,7 @@ export function createDriverCore({
     stop() {
       if (stopPromise) return stopPromise;
       stopped = true; transportConnected = false; stage = 'stopped'; generation++;
-      recovery.stop(); noticeMapper?.close(); flow.stop(); accountActions.close(); contextActions.close(); audio.close(); cancelRememberedRead?.(); rejectPending(failure('QQ native driver stopped.'));
+      recovery.stop(); noticeMapper?.close(); friendActions.close(); privateActions.close(); flow.stop(); accountActions.close(); contextActions.close(); audio.close(); cancelRememberedRead?.(); rejectPending(failure('QQ native driver stopped.'));
       clearImmediate(sessionStartHandle); sessionStartHandle = null;
       stopPromise = (async () => {
         try { await selectionWrite; } catch {}

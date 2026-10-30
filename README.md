@@ -2,7 +2,7 @@
 
 公开源码：[Edgerqzh/QQBridge](https://github.com/Edgerqzh/QQBridge)。原创代码使用 MIT 许可。
 
-文本版已验证真实扫码、群消息收发和 OneBot WebSocket 推送。新增图片、文件、语音、提及与撤回处于显式启用的实验阶段。0.3 增加 [主动下载与语音转码](docs/DOWNLOAD_AUDIO.md)、[本地扫码登录网页](docs/LOGIN_WEB.md)，0.4 增加 [引用回复、消息查询、历史、群成员与 ID 持久化](docs/CONTEXT.md)。0.5 增加 [撤回通知、成员事件与掉线恢复](docs/EVENTS_RECOVERY.md)。详细覆盖见各阶段验证记录。
+文本版已验证真实扫码、群消息收发和 OneBot WebSocket 推送。新增图片、文件、语音、提及与撤回处于显式启用的实验阶段。0.3 增加 [主动下载与语音转码](docs/DOWNLOAD_AUDIO.md)、[本地扫码登录网页](docs/LOGIN_WEB.md)，0.4 增加 [引用回复、消息查询、历史、群成员与 ID 持久化](docs/CONTEXT.md)。0.5 增加 [撤回通知、成员事件与掉线恢复](docs/EVENTS_RECOVERY.md)。0.6 增加 [好友私聊收发、查询、媒体与撤回](docs/PRIVATE.md)。详细覆盖见各阶段验证记录。
 
 普通 QQ 账号接入的独立开发 MVP：使用指定 Linux QQ 客户端的原生能力，对外提供部分 OneBot 11 HTTP / WebSocket 接口，供 AI 应用接入。
 
@@ -101,6 +101,9 @@ npm run qrcode
 | `get_login_state` | 登录、账号选择、会话与在线证据状态 |
 | `get_login_info` | 当前账号信息 |
 | `get_group_list` | 原生会话返回的群列表 |
+| `get_friend_list` / `get_friend_info` | 当前好友列表及资料 |
+| `send_private_msg` / `send_msg` | 好友私聊发送与统一发送入口 |
+| `get_friend_msg_history` / `upload_private_file` | 私聊本地历史与实验文件发送 |
 | `send_group_msg` | 文字及显式启用的富媒体、引用回复；文字最多 4096 UTF-8 字节，不解析 CQ 码 |
 | `get_msg` | 按桥接消息 ID 查询真实原生记录 |
 | `get_group_msg_history` | 本地群历史，支持有界条数和桥接 ID 游标 |
@@ -116,7 +119,7 @@ npm run qrcode
 
 原生 19 位消息 ID 保持字符串；对外别名为正 int32。映射和去重记忆按账号保存到私有 profile，默认 FIFO 容量 5000；同账号同资料目录重启后保留，淘汰后失效，旧 ID 不会重新分配。映射不保存正文或昵称。损坏索引拒绝初始化；持久化机制、升级边界和历史分页见 [消息上下文说明](docs/CONTEXT.md)。
 
-图片、文件、语音、提及、引用收发和撤回提供显式启用的实验接口，详见 [富媒体说明](docs/RICH_MEDIA.md)。私聊和多账号尚未实现；完整原生容器已提供有界的掉线 / 原生进程恢复，认证失效转为重新扫码，见 [恢复说明](docs/EVENTS_RECOVERY.md)。同一资料目录中明确选择缓存账号的快速登录已实现。默认文本模式不启用新增消息段。
+图片、文件、语音、提及、引用收发和撤回提供显式启用的实验接口，详见 [富媒体说明](docs/RICH_MEDIA.md)。已有好友私聊已实现，见 [私聊说明](docs/PRIVATE.md)；多账号尚未实现。完整原生容器已提供有界的掉线 / 原生进程恢复，认证失效转为重新扫码，见 [恢复说明](docs/EVENTS_RECOVERY.md)。同一资料目录中明确选择缓存账号的快速登录已实现。默认文本模式不启用新增消息段。
 
 ## 网关连接
 

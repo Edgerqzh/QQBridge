@@ -1,5 +1,7 @@
 const fail = (message, retcode = 1400) => Object.assign(new Error(message), { retcode });
-export async function buildGroupSegments({ groupId, message, autoEscape, mediaStore, resolveUid, prepareImage, resolveReply }) {
+export async function buildGroupSegments({ groupId, message, autoEscape, mediaStore, resolveUid, prepareImage, resolveReply, peer }) {
+  const targetPeer = peer ?? { chatType: 2, peerUid: String(groupId), guildId: '' };
+  if (![1,2].includes(targetPeer.chatType) || targetPeer.chatType === 1 && !/^u_[A-Za-z0-9_-]{1,126}$/.test(targetPeer.peerUid)) throw fail('Invalid message peer.');
   if (autoEscape !== undefined && typeof autoEscape !== 'boolean') throw fail('auto_escape must be boolean.');
   if (typeof message === 'string') {
     if (autoEscape !== true && message.includes('[CQ:')) throw fail('CQ parsing is unsupported; use message segment arrays.', 1404);
@@ -19,7 +21,7 @@ export async function buildGroupSegments({ groupId, message, autoEscape, mediaSt
     } else if (segment.type === 'reply') {
       if (typeof resolveReply !== 'function') throw fail('Reply lookup is unavailable.', 1503);
       const source = await resolveReply(data.id);
-      if (source?.chatType !== 2 || String(source.peerUin) !== String(groupId) || !/^[1-9]\d{0,63}$/.test(source.msgId) || !/^[1-9]\d{0,63}$/.test(source.msgSeq) || !/^[1-9]\d{4,11}$/.test(source.senderUin) || typeof source.senderUid !== 'string' || !/^u_[A-Za-z0-9_-]{1,126}$/.test(source.senderUid) || !/^\d{1,12}$/.test(String(source.msgTime))) throw fail('Reply target has no usable native source metadata.', 1404);
+      if (source?.chatType !== targetPeer.chatType || String(source.peerUin) !== String(groupId) || targetPeer.chatType === 1 && source.peerUid !== targetPeer.peerUid || !/^[1-9]\d{0,63}$/.test(source.msgId) || !/^[1-9]\d{0,63}$/.test(source.msgSeq) || !/^[1-9]\d{4,11}$/.test(source.senderUin) || typeof source.senderUid !== 'string' || !/^u_[A-Za-z0-9_-]{1,126}$/.test(source.senderUid) || !/^\d{1,12}$/.test(String(source.msgTime))) throw fail('Reply target has no usable native source metadata.', 1404);
       // Populate the SDK's reply element from the actual source record. The
       // numeric senderUid and NT senderUidStr are distinct native fields.
       const sourceText = (source.elements ?? []).filter(element => element.elementType === 1 && typeof element.textElement?.content === 'string').map(element => element.textElement.content).join('').slice(0, 4096);
@@ -31,6 +33,7 @@ export async function buildGroupSegments({ groupId, message, autoEscape, mediaSt
         sourceMsgIsIncPic: source.elements?.some(element => element.elementType === 2) ?? false, sourceMsgExpired: false, anonymousNickName: '', originalMsgState: 0,
       } });
     } else if (segment.type === 'at') {
+      if(targetPeer.chatType===1)throw fail('Mentions are not supported in friend conversations.',1404);
       const all = data.qq === 'all', uin = String(data.qq);
       if (!all && !/^[1-9]\d{4,11}$/.test(uin)) throw fail('at.qq must be a QQ account number or all.');
       const uid = all ? 'all' : await resolveUid(uin);
@@ -63,7 +66,7 @@ export async function buildGroupSegments({ groupId, message, autoEscape, mediaSt
     } else throw fail(`Unsupported message segment: ${String(segment.type).slice(0,32)}`, 1404);
   }
   if (textBytes > 4096) throw fail('Text content exceeds 4096 UTF-8 bytes.');
-  return { peer: { chatType: 2, peerUid: String(groupId), guildId: '' }, elements, attributes: new Map() };
+  return { peer: targetPeer, elements, attributes: new Map() };
 }
 
 export async function resolveGroupUid(groupService, uin) {

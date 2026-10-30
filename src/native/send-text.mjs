@@ -53,6 +53,7 @@ export async function sendText({
 }
 
 export async function sendElements({ msgService, message, now = Date.now, timeoutMs = 12000 }) {
+  if (![1,2].includes(message?.peer?.chatType) || typeof message.peer.peerUid !== 'string' || (message.peer.chatType === 1 && !/^u_[A-Za-z0-9_-]{1,126}$/.test(message.peer.peerUid))) throw new NativeSendError('INVALID_PEER', 'Invalid native message peer.', { retcode: 1400 });
   if (typeof msgService?.generateMsgUniqueId !== 'function' || typeof msgService?.sendMsg !== 'function') {
     throw new NativeSendError('NATIVE_SEND_UNAVAILABLE', 'QQ native message service is unavailable.', { retcode: 1503 });
   }
@@ -67,7 +68,7 @@ export async function sendElements({ msgService, message, now = Date.now, timeou
   try {
     // The official generator takes chat_type=2 and epoch milliseconds as text.
     // It applies its own group-ID offset; never synthesize an ID from received IDs.
-    nativeId = msgService.generateMsgUniqueId(2, String(milliseconds));
+    nativeId = msgService.generateMsgUniqueId(message.peer.chatType, String(milliseconds));
   } catch {
     throw new NativeSendError('NATIVE_ID_GENERATION_FAILED', 'QQ could not generate a native message ID. No send was attempted.');
   }

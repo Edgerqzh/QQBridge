@@ -1,6 +1,6 @@
 const escape = text => text.replaceAll('&', '&amp;').replaceAll('[', '&#91;').replaceAll(']', '&#93;').replaceAll(',', '&#44;');
 const safe = value => typeof value === 'string' && value.length > 0 && value.length <= 512 && !/[\\/\u0000-\u001f\u007f]/.test(value) ? value : null;
-export function receivedSegments(elements, resolveReply = () => null) {
+export function receivedSegments(elements, resolveReply = () => null, mediaId = id => id) {
   if (!Array.isArray(elements) || !elements.length || elements.length > 64) return null;
   const message = [];
   for (const element of elements) {
@@ -12,15 +12,15 @@ export function receivedSegments(elements, resolveReply = () => null) {
     } else if (element?.elementType === 2 && element.picElement) {
       const picture = element.picElement, id = safe(picture.fileUuid) ?? safe(picture.md5HexStr);
       if (!id) return null;
-      message.push({ type: 'image', data: { file: id } });
+      message.push({ type: 'image', data: { file: mediaId(id) } });
     } else if (element?.elementType === 3 && element.fileElement) {
       const file = element.fileElement, id = safe(file.fileUuid) ?? safe(file.fileMd5);
       if (!id || !safe(file.fileName) || !/^\d{1,16}$/.test(String(file.fileSize))) return null;
-      message.push({ type: 'file', data: { file: id, name: file.fileName, size: String(file.fileSize) } });
+      message.push({ type: 'file', data: { file: mediaId(id), name: file.fileName, size: String(file.fileSize) } });
     } else if (element?.elementType === 4 && element.pttElement) {
       const voice = element.pttElement, id = safe(voice.fileUuid) ?? safe(voice.md5HexStr);
       if (!id) return null;
-      message.push({ type: 'record', data: { file: id } });
+      message.push({ type: 'record', data: { file: mediaId(id) } });
     } else if (element?.elementType === 7 && element.replyElement) {
       const id = resolveReply(element.replyElement.replayMsgId, element.replyElement);
       if (Number.isInteger(id) && id > 0) message.push({ type: 'reply', data: { id: String(id) } });

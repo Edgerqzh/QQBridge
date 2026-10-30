@@ -55,13 +55,14 @@ function nickname(record) {
 }
 
 function cqText(text) { return text.replaceAll('&', '&amp;').replaceAll('[', '&#91;').replaceAll(']', '&#93;'); }
+function sequenceKey(meta, sequence = meta.msgSeq, sender = meta.senderUin) { return `${meta.chatType}:${meta.peerUin}:${meta.chatType === 1 ? (sender ?? '') + ':' : ''}${sequence}`; }
 
 /**
  * Map group records to events and query results without retaining bodies.
  * IDs and deduplication are FIFO bounded; optional snapshots preserve them.
  * rememberNative allocates an alias but does not mark an event as emitted.
  */
-export function createMessageMapper({ selfId, allowedGroups, capacity = 5000, richMedia = false, initialState, onChange = () => {} } = {}) {
+export function createMessageMapper({ selfId, allowedGroups, capacity = 5000, richMedia = false, privateMessages = false, initialState, onChange = () => {} } = {}) {
   if (!Number.isInteger(capacity) || capacity < 1 || capacity > MAX_ALIAS) throw new RangeError('capacity must be a positive int32 integer');
   if (typeof selfId !== 'function' && !numericIdentity(selfId)) throw new TypeError('selfId must be a positive safe integer identity or getter');
   let allow;
@@ -89,7 +90,7 @@ export function createMessageMapper({ selfId, allowedGroups, capacity = 5000, ri
       seenAliases.add(saved.alias); seenKeys.add(parsed.key);
       byNative.set(parsed.key, saved.alias);
       byAlias.set(saved.alias, { key: parsed.key, metadata: parsed.value, emitted: saved.emitted });
-      if (parsed.value.msgSeq && parsed.value.msgSeq !== '0') bySequence.set(`${parsed.peer.text}:${parsed.value.msgSeq}`, saved.alias);
+      if (parsed.value.msgSeq && parsed.value.msgSeq !== '0') bySequence.set(sequenceKey(parsed.value), saved.alias);
     }
     nextAlias = initialState.nextAlias;
     if (initialState.notices !== undefined) {
@@ -99,26 +100,29 @@ export function createMessageMapper({ selfId, allowedGroups, capacity = 5000, ri
   }
 
   function metadata(record) {
-    if (!record || typeof record !== 'object' || Array.isArray(record) || record.chatType !== 2) return null;
+    if (!record || typeof record !== 'object' || Array.isArray(record) || !(record.chatType === 2 || privateMessages && record.chatType === 1)) return null;
     const peer = numericIdentity(record.peerUin);
     const msgId = nativeIdentifier(record.msgId);
     if (!peer || !msgId) return null;
-    const value = { chatType: 2, peerUin: peer.text, msgId };
+    if (record.chatType === 1 && (typeof record.peerUid !== 'string' || !/^u_[A-Za-z0-9_-]{1,126}$/.test(record.peerUid))) return null;
+    const value = { chatType: record.chatType, peerUin: peer.text, msgId };
+    if(record.chatType===1&&numericIdentity(record.senderUin))value.senderUin=String(record.senderUin);
+    if(record.chatType===1&&timestamp(record.msgTime)!==null)value.msgTime=String(record.msgTime);
     if (typeof record.peerUid === 'string' && record.peerUid.length > 0 && record.peerUid.length <= 256 && !/[\u0000-\u001f\u007f]/.test(record.peerUid)) value.peerUid = record.peerUid;
     const msgSeq = sequenceIdentifier(record.msgSeq);
     if (msgSeq !== undefined) value.msgSeq = msgSeq;
-    return { key: `2:${peer.text}:${msgId}`, value, peer };
+    return { key: `${record.chatType}:${peer.text}:${msgId}`, value, peer };
   }
 
   function remember(parsed) {
-    if (allow && !allow.has(parsed.peer.text)) return null;
+    if (parsed.value.chatType === 2 && allow && !allow.has(parsed.peer.text)) return null;
     const existing = byNative.get(parsed.key);
     if (existing !== undefined) {
       const entry = byAlias.get(existing);
       const updated = { ...entry.metadata, ...parsed.value };
-      if (entry.metadata.msgSeq !== updated.msgSeq && bySequence.get(`${parsed.peer.text}:${entry.metadata.msgSeq}`) === existing) bySequence.delete(`${parsed.peer.text}:${entry.metadata.msgSeq}`);
+      if (sequenceKey(entry.metadata) !== sequenceKey(updated) && bySequence.get(sequenceKey(entry.metadata)) === existing) bySequence.delete(sequenceKey(entry.metadata));
       if (JSON.stringify(updated) !== JSON.stringify(entry.metadata)) { entry.metadata = updated; onChange(); }
-      if (updated.msgSeq && updated.msgSeq !== '0') bySequence.set(`${parsed.peer.text}:${updated.msgSeq}`, existing);
+      if (updated.msgSeq && updated.msgSeq !== '0') bySequence.set(sequenceKey(updated), existing);
       return existing;
     }
     // Never reuse an evicted alias. Old application references must fail rather
@@ -129,34 +133,37 @@ export function createMessageMapper({ selfId, allowedGroups, capacity = 5000, ri
       const oldest = byAlias.get(oldestAlias);
       byAlias.delete(oldestAlias);
       byNative.delete(oldest.key);
-      if (bySequence.get(`${oldest.metadata.peerUin}:${oldest.metadata.msgSeq}`) === oldestAlias) bySequence.delete(`${oldest.metadata.peerUin}:${oldest.metadata.msgSeq}`);
+      if (bySequence.get(sequenceKey(oldest.metadata)) === oldestAlias) bySequence.delete(sequenceKey(oldest.metadata));
     }
     const alias = nextAlias;
     nextAlias++;
     byNative.set(parsed.key, alias);
     byAlias.set(alias, { key: parsed.key, metadata: { ...parsed.value }, emitted: false });
-    if (parsed.value.msgSeq && parsed.value.msgSeq !== '0') bySequence.set(`${parsed.peer.text}:${parsed.value.msgSeq}`, alias);
+    if (parsed.value.msgSeq && parsed.value.msgSeq !== '0') bySequence.set(sequenceKey(parsed.value), alias);
     onChange();
     return alias;
   }
 
   function content(record, parsed) {
     return richMedia ? receivedSegments(record.elements, (nativeId, reply) => {
-      const bySeq = bySequence.get(`${parsed.peer.text}:${reply?.replayMsgSeq}`);
-      if (bySeq !== undefined) return bySeq;
+      const exact=byNative.get(`${parsed.value.chatType}:${parsed.peer.text}:${nativeId}`);
+      if(exact!==undefined)return exact;
+      const bySeq = bySequence.get(sequenceKey(parsed.value,reply?.replayMsgSeq,reply?.senderUid));
+      if (bySeq !== undefined && (parsed.value.chatType!==1 || !timestamp(reply?.replyMsgTime) || byAlias.get(bySeq)?.metadata.msgTime===String(reply.replyMsgTime))) return bySeq;
       if (!nativeIdentifier(nativeId)) return null;
-      return remember(metadata({ chatType: 2, peerUin: parsed.peer.text, peerUid: parsed.value.peerUid, msgId: nativeId, msgSeq: reply?.replayMsgSeq }));
-    }) : (() => { const text = textContent(record.elements); return text === null ? null : { message: [{ type: 'text', data: { text } }], raw: cqText(text) }; })();
+      return remember(metadata({ chatType: parsed.value.chatType, peerUin: parsed.peer.text, peerUid: parsed.value.peerUid, msgId: nativeId, msgSeq: reply?.replayMsgSeq, senderUin: reply?.senderUid }));
+    }, id => parsed.value.chatType === 1 ? `private:${parsed.peer.text}:${id}` : id) : (() => { const text = textContent(record.elements); return text === null ? null : { message: [{ type: 'text', data: { text } }], raw: cqText(text) }; })();
   }
 
   return {
     fromNative(record) {
       const parsed = metadata(record);
-      if (!parsed || (allow && !allow.has(parsed.peer.text)) || record.isOnlineMsg !== true || record.isImportMsg !== false) return null;
+      if (!parsed || (record.chatType === 2 && allow && !allow.has(parsed.peer.text)) || record.isOnlineMsg !== true || record.isImportMsg !== false) return null;
       let own;
       try { own = numericIdentity(typeof selfId === 'function' ? selfId() : selfId); } catch { return null; }
       const sender = numericIdentity(record.senderUin);
       if (!own || !sender || own.text === sender.text) return null;
+      if(record.chatType===1&&sender.text!==parsed.peer.text)return null;
       // msgTime is the observed native field. time is only a strict integer
       // seconds compatibility fallback when the native field is absent.
       const time = timestamp(record.msgTime === undefined ? record.time : record.msgTime);
@@ -169,20 +176,20 @@ export function createMessageMapper({ selfId, allowedGroups, capacity = 5000, ri
       entry.emitted = true;
       onChange();
       return {
-        time, self_id: own.value, post_type: 'message', message_type: 'group', sub_type: 'normal',
-        message_id: alias, group_id: parsed.peer.value, user_id: sender.value,
-        anonymous: null, message: rich.message, raw_message: rich.raw, font: 0,
+        time, self_id: own.value, post_type: 'message', message_type: record.chatType === 1 ? 'private' : 'group', sub_type: record.chatType === 1 ? 'friend' : 'normal',
+        message_id: alias, ...(record.chatType === 2 ? { group_id: parsed.peer.value, anonymous: null } : {}), user_id: sender.value,
+        message: rich.message, raw_message: rich.raw, font: 0,
         sender: { user_id: sender.value, nickname: nickname(record) },
       };
     },
     toMessage(record) {
       const parsed = metadata(record), sender = numericIdentity(record?.senderUin);
       const time = timestamp(record?.msgTime === undefined ? record?.time : record.msgTime);
-      if (!parsed || !sender || time === null || (allow && !allow.has(parsed.peer.text))) return null;
+      if (!parsed || !sender || time === null || (record.chatType === 2 && allow && !allow.has(parsed.peer.text))) return null;
       const rich = content(record, parsed);
       if (!rich) return null;
       const alias = remember(parsed);
-      return { time, message_type: 'group', message_id: alias, real_id: alias, group_id: parsed.peer.value,
+      return { time, message_type: record.chatType === 1 ? 'private' : 'group', message_id: alias, real_id: alias, ...(record.chatType === 2 ? { group_id: parsed.peer.value } : { user_id: parsed.peer.value }),
         message_seq: parsed.value.msgSeq ?? null, native_message_id: parsed.value.msgId,
         sender: { user_id: sender.value, nickname: nickname(record) }, message: rich.message, raw_message: rich.raw };
     },
@@ -196,7 +203,7 @@ export function createMessageMapper({ selfId, allowedGroups, capacity = 5000, ri
       if (notices.size >= capacity) notices.delete(notices.values().next().value);
       notices.add(key); onChange(); return true;
     },
-    lookupSequence(group, sequence) { return bySequence.get(`${group}:${sequence}`) ?? null; },
+    lookupSequence(group, sequence, chatType = 2, senderUin) { return bySequence.get(sequenceKey({chatType,peerUin:String(group)},sequence,senderUin)) ?? null; },
     rememberNative(record) {
       const parsed = metadata(record);
       return parsed ? remember(parsed) : null;

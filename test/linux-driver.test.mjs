@@ -79,7 +79,7 @@ async function fixture(t, options = {}) {
     prepareProfile: async () => 'fixture-machine-id',
     emitStatus(value) { timeline.push(['status', value]); },
     emitEvent(value) { timeline.push(['event', value]); },
-    experimentalRichMedia: options.experimentalRichMedia, allowedGroups: options.allowedGroups, loginUin: options.loginUin ?? '',
+    experimentalRichMedia: options.experimentalRichMedia, allowedGroups: options.allowedGroups, allowedUsers: options.allowedUsers, loginUin: options.loginUin ?? '',
     createIndex: options.createIndex ?? (() => ({ load: async () => undefined, changed() {}, flush: async () => {}, status: () => ({ dirty: false, failed: false }) })),
     connectionTimeoutMs: 80, qrTimeoutMs: 80, accountTimeoutMs: 80, sendTimeoutMs: options.sendTimeoutMs ?? 80,
     requestRestart: options.requestRestart, recoveryGraceMs: options.recoveryGraceMs, forceQr: options.forceQr,
@@ -98,7 +98,7 @@ async function fixture(t, options = {}) {
           return { ...state, online: state.forcedOffline ? false : online, good: state.forcedOffline ? false : online };
         },
         authenticationEvidence: () => value.getAuthenticationEvidence(),
-        getServices: () => ({ msgService, groupService }),
+        getServices: () => ({ msgService, groupService, buddyService: options.friendList ? {getBuddyList(){value.onFriendList(options.friendList);return {result:0};}} : undefined }),
         online() { Object.assign(state, { forcedOffline: false, session_ready: true, online: true, good: true, online_message_observed: true, msf_status: 1, msf_error: 0 }); value.onState({ ...state }); },
         offline() { Object.assign(state, { forcedOffline: true, online: false, good: false, msf_status: 0 }); value.onState({ ...state }); },
         updates(raw) { value.onMessageUpdate(raw); },
@@ -606,6 +606,30 @@ test('generic remembered-login failure is recoverable and is not misclassified a
 test('force-QR recovery ignores unsolicited cached account callbacks until a QR was requested', async t => {
   const f=await fixture(t,{forceQr:true});await f.select();assert.equal(f.sessions.length,0);
   await f.driver.call('get_login_qrcode');await f.select();assert.equal(f.sessions.length,1);
+});
+
+test('private friend events, unified sends, queries, recall and IDs survive driver recreation', async t => {
+  const profile=await mkdtemp(path.join(os.tmpdir(),'qqbridge-private-driver-'));
+  const privateRecord=record({chatType:1,peerUin:'987654321',peerUid:'u_fixture_sender',senderUid:'u_fixture_sender',msgSeq:'17'});
+  const list=[privateRecord],friendList=[{categroyMbCount:1,buddyList:[{uin:'987654321',uid:'u_fixture_sender',coreInfo:{uin:'987654321',uid:'u_fixture_sender',nick:'Fixture friend',remark:'Test'},baseInfo:{age:20}}]}];
+  const options={profile,createIndex:createMessageIndex,friendList,allowedGroups:new Set(['10001']),allowedUsers:new Set(['987654321']),experimentalRichMedia:true,msgService:{
+    getMsgsByMsgId(peer,ids){assert.equal(peer.chatType,1);assert.equal(peer.peerUid,'u_fixture_sender');return {result:0,msgList:list.filter(r=>ids.includes(r.msgId))};},
+    getLatestDbMsgs(){return {result:0,msgList:list};},
+    sendMsg(id,peer,elements){assert.equal(peer.chatType,1);list.push({...privateRecord,msgId:id,msgSeq:'18',senderUin:account.uin,senderUid:account.uid,elements});return {result:0};},
+  }};
+  const f=await fixture(t,options);await f.select();await f.online();
+  const friends=await f.driver.call('get_friend_list');assert.equal(friends[0].user_id,987654321);
+  f.sessions[0].receive([privateRecord]);await waitFor(()=>f.timeline.some(x=>x[1]?.message_type==='private'));
+  const incoming=f.timeline.find(x=>x[1]?.message_type==='private')[1];assert.equal(incoming.sub_type,'friend');assert.equal('group_id'in incoming,false);
+  const sent=await f.driver.call('send_msg',{message_type:'private',user_id:'987654321',message:[{type:'reply',data:{id:String(incoming.message_id)}},{type:'text',data:{text:'fixture private reply'}}]});
+  assert.equal(f.calls.find(x=>x[0]==='generate-id')[1],1);
+  await assert.rejects(f.driver.call('send_msg',{user_id:'987654321',group_id:'10001',message:'ambiguous'}),{retcode:1400});
+  await assert.rejects(f.driver.call('send_private_msg',{user_id:'987654322',message:'unknown'}),{retcode:1403});
+  await f.driver.stop();const next=await fixture(t,options);await next.select();await next.online();
+  assert.equal((await next.driver.call('get_msg',{message_id:incoming.message_id})).message_type,'private');
+  assert.equal((await next.driver.call('get_friend_msg_history',{user_id:'987654321'})).messages.length,2);
+  await next.driver.call('delete_msg',{message_id:sent.message_id});assert.equal(next.calls.find(x=>x[0]==='recall')[1].chatType,1);
+  t.after(()=>rm(profile,{recursive:true,force:true}));
 });
 
 test('fresh QR refresh cancels an existing session and ignores only its expected cancellation',async t=>{

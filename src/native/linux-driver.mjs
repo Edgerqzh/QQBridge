@@ -16,6 +16,7 @@ export async function createDriver({ emitEvent, emitStatus, requestRestart }) {
     throw new Error('Experimental native support requires the tested Linux QQ 3.2.34-53644 x64 build.');
   }
   const allowedGroups = parseAllowedGroups(process.env.QQBRIDGE_ALLOWED_GROUPS);
+  const allowedUsers = parseAllowedGroups(process.env.QQBRIDGE_ALLOWED_USERS,'QQBRIDGE_ALLOWED_USERS');
   const loginUin = process.env.QQBRIDGE_LOGIN_UIN || (process.env.QQBRIDGE_FORCE_QR === '1' ? '' : await readSelectedLogin(profile));
   const require = createRequire(import.meta.url);
   let native;
@@ -25,7 +26,7 @@ export async function createDriver({ emitEvent, emitStatus, requestRestart }) {
     throw new Error('The QQ native module does not expose the required verified interfaces.');
   }
   return createDriverCore({
-    native, metadata, profile, emitEvent, emitStatus, allowedGroups, loginUin, requestRestart,
+    native, metadata, profile, emitEvent, emitStatus, allowedGroups, allowedUsers, loginUin, requestRestart,
     forceQr: process.env.QQBRIDGE_FORCE_QR === '1', manualRecoveryReason: process.env.QQBRIDGE_RECOVERY_MANUAL || '',
     experimentalRichMedia: process.env.QQBRIDGE_EXPERIMENTAL_RICH_MEDIA === '1',
     persistSelectedAccount: uin => saveSelectedLogin(profile,uin),

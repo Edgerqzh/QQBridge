@@ -61,7 +61,7 @@ const shape = value => {
  */
 export function createLinuxSession({
   native, engine, account, profile, metadata, machineId,
-  onState = () => {}, onMessage, onMessageUpdate, onGroupList, onAuthenticationRequired, onUnsupportedDependency = () => {},
+  onState = () => {}, onMessage, onMessageUpdate, onGroupList, onFriendList, onAuthenticationRequired, onUnsupportedDependency = () => {},
   forwardDispatcher, initTimeoutMs = 20000, getAuthenticationEvidence = () => false, getAuthenticationEvidenceType = () => 'native_login_result',
 }) {
   if (typeof account?.uin !== 'string' || !/^\d{5,12}$/.test(account.uin) ||
@@ -80,7 +80,7 @@ export function createLinuxSession({
   if (typeof getAuthenticationEvidence !== 'function') throw new TypeError('Authentication evidence must be a pure getter.');
 
   const root = path.resolve(profile);
-  let startup, session, msgService, groupService, msgListener, groupListener;
+  let startup, session, msgService, groupService, buddyService, msgListener, groupListener, buddyListener;
   let startPromise, resolveStart, rejectStart, timer, stopped = false, failed = false;
   let nativeReady = false, startupAccepted = false;
   let readingAuthentication = false, recursiveAuthenticationRead = false;
@@ -246,6 +246,11 @@ export function createLinuxSession({
   }
   function attachServices() {
     msgService = session.getMsgService(); groupService = session.getGroupService();
+    buddyService = session.getBuddyService?.();
+    if (buddyService && typeof onFriendList === 'function') {
+      buddyListener = notificationAdapter({ onBuddyListChange: rows => { if (!stopped) observer(onFriendList, rows); } });
+      buddyService.addKernelBuddyListener(buddyListener);
+    }
     msgListener = notificationAdapter({ onRecvMsg: raw => {
       if (stopped || !Array.isArray(raw)) return;
       state.message_batches_received++;
@@ -329,13 +334,14 @@ export function createLinuxSession({
       if (!state.session_ready) rejectStart?.(fail('QQ native account session stopped before initialization completed.'));
       try { if (msgListener) msgService?.removeKernelMsgListener(msgListener); } catch {}
       try { if (groupListener) groupService?.removeKernelGroupListener(groupListener); } catch {}
+      try { if (buddyListener) buddyService?.removeKernelBuddyListener(buddyListener); } catch {}
       state.session_ready = false; state.stage = 'stopped'; notify();
       // The owning native host process performs final kernel teardown. Do not
       // invoke unverified native logout/close operations on the user's account.
     },
     getServices() {
       if (!state.session_ready || stopped) throw fail('QQ native account session is not initialized.');
-      return { session, startup, msgService, groupService };
+      return { session, startup, msgService, groupService, buddyService };
     },
     status,
     setDispatcher(hook) {
