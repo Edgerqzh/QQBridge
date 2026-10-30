@@ -2,7 +2,7 @@
 
 公开源码：[Edgerqzh/QQBridge](https://github.com/Edgerqzh/QQBridge)。原创代码使用 MIT 许可。
 
-文本版已验证真实扫码、群消息收发和 OneBot WebSocket 推送。新增图片、文件、语音、提及与撤回处于显式启用的实验阶段。0.3 增加 [主动下载与语音转码](docs/DOWNLOAD_AUDIO.md)、[本地扫码登录网页](docs/LOGIN_WEB.md)，详细覆盖见验证记录。
+文本版已验证真实扫码、群消息收发和 OneBot WebSocket 推送。新增图片、文件、语音、提及与撤回处于显式启用的实验阶段。0.3 增加 [主动下载与语音转码](docs/DOWNLOAD_AUDIO.md)、[本地扫码登录网页](docs/LOGIN_WEB.md)，0.4 增加 [引用回复、消息查询、历史、群成员与 ID 持久化](docs/CONTEXT.md)。详细覆盖见各阶段验证记录。
 
 普通 QQ 账号接入的独立开发 MVP：使用指定 Linux QQ 客户端的原生能力，对外提供部分 OneBot 11 HTTP / WebSocket 接口，供 AI 应用接入。
 
@@ -101,17 +101,22 @@ npm run qrcode
 | `get_login_state` | 登录、账号选择、会话与在线证据状态 |
 | `get_login_info` | 当前账号信息 |
 | `get_group_list` | 原生会话返回的群列表 |
-| `send_group_msg` | 普通群文本，最多 4096 UTF-8 字节，不解析 CQ 码 |
+| `send_group_msg` | 文字及显式启用的富媒体、引用回复；文字最多 4096 UTF-8 字节，不解析 CQ 码 |
+| `get_msg` | 按桥接消息 ID 查询真实原生记录 |
+| `get_group_msg_history` | 本地群历史，支持有界条数和桥接 ID 游标 |
+| `get_group_member_list` / `get_group_member_info` | 主动刷新群成员列表或查询单个成员 |
+| `upload_group_file` / `delete_msg` | 实验文件发送和消息撤回 |
+| `get_file` / `get_record` / `convert_record` | 已知媒体下载与语音转码 |
 
 网关另提供 `get_status`、`get_version_info`。实时、非导入的群文本转换为 OneBot 群消息事件，默认忽略自身消息并做窗口内去重。
 
-`message` 可以是字符串，或非空且全部为 `text` 的消息段数组。带 `[CQ:` 外观的字符串默认返回不支持；显式 `auto_escape: true` 或使用文本消息段时按字面文本处理。发送成功的标准数据为 `{ "message_id": <本进程别名> }`。
+默认文本模式下，`message` 可以是字符串，或非空且全部为 `text` 的消息段数组。启用富媒体后支持额外类型，见对应说明。带 `[CQ:` 外观的字符串默认返回不支持；显式 `auto_escape: true` 或使用文本消息段时按字面文本处理。发送成功的标准数据为 `{ "message_id": <持久化别名> }`。
 
 发送要求真实在线状态和目标群成员关系。`QQBRIDGE_ALLOWED_GROUPS` 同时过滤群列表、接收与发送。原生 ACK 成功只表示请求被接受；本次测试另由用户确认群内可见，才记录为实际送达。超时或回包异常保留“送达未知”，不自动重试。
 
-原生 19 位消息 ID 保持字符串；对外别名为正 int32。映射和去重记忆默认 FIFO 容量 5000，只存在当前进程；淘汰或重启后旧别名失效，窗口外重复可能重新出现。映射不保存正文或昵称。
+原生 19 位消息 ID 保持字符串；对外别名为正 int32。映射和去重记忆按账号保存到私有 profile，默认 FIFO 容量 5000；同账号同资料目录重启后保留，淘汰后失效，旧 ID 不会重新分配。映射不保存正文或昵称。损坏索引拒绝初始化；持久化机制、升级边界和历史分页见 [消息上下文说明](docs/CONTEXT.md)。
 
-图片、文件、语音、提及、引用接收和撤回提供显式启用的实验接口，详见 [富媒体说明](docs/RICH_MEDIA.md)。私聊、多账号及通用自动会话恢复尚未实现；同一资料目录中明确选择缓存账号的快速登录已实现。默认文本模式不启用新增消息段。
+图片、文件、语音、提及、引用收发和撤回提供显式启用的实验接口，详见 [富媒体说明](docs/RICH_MEDIA.md)。私聊、多账号及通用自动会话恢复尚未实现；同一资料目录中明确选择缓存账号的快速登录已实现。默认文本模式不启用新增消息段。
 
 ## 网关连接
 

@@ -5,6 +5,15 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { createDriverCore, parseAllowedGroups } from '../src/native/driver-core.mjs';
+import { createMessageIndex } from '../src/native/message-index.mjs';
+
+async function waitFor(predicate) {
+  const deadline = Date.now() + 1500;
+  while (!predicate()) {
+    if (Date.now() > deadline) throw new Error('Fixture condition timed out.');
+    await new Promise(resolve => setTimeout(resolve, 2));
+  }
+}
 
 const account = { uin: '123456789', uid: 'u_fixture_account', nickName: 'Fixture' };
 const groups = [{ groupCode: '10001', groupName: 'Fixture group', memberCount: 3, maxMember: 200 }];
@@ -50,6 +59,7 @@ async function fixture(t, options = {}) {
     recallMsg(...args) { calls.push(['recall', ...args]); return { result: 0 }; },
     generateMsgUniqueId(...args) { calls.push(['generate-id', ...args]); return nativeId; },
     sendMsg(...args) { calls.push(['send', ...args]); return options.sendResult ?? { result: 0 }; },
+    ...options.msgService,
   };
   const groupService = {
     getUidByUins(uins) { return { errCode: 0, uids: new Map(uins.map(uin => [uin, 'u_fixture_target'])) }; },
@@ -58,17 +68,19 @@ async function fixture(t, options = {}) {
       if (options.autoGroups !== false) queueMicrotask(() => sessionOptions.onGroupList(options.groups ?? groups));
       return { result: 0 };
     },
+    ...options.groupService,
   };
   const driver = createDriverCore({
     native: {
       NodeIQQNTWrapperEngine: { get: () => ({ initWithDeskTopConfig() { calls.push(['engine-init']); } }) },
       NodeIKernelLoginService: { get: () => login },
     },
-    metadata: { version: '3.2.34-53644', appid: { linux: '537391511' } }, profile: '/fixture/profile',
+    metadata: { version: '3.2.34-53644', appid: { linux: '537391511' } }, profile: options.profile ?? '/fixture/profile',
     prepareProfile: async () => 'fixture-machine-id',
     emitStatus(value) { timeline.push(['status', value]); },
     emitEvent(value) { timeline.push(['event', value]); },
     experimentalRichMedia: options.experimentalRichMedia, allowedGroups: options.allowedGroups, loginUin: options.loginUin ?? '',
+    createIndex: options.createIndex ?? (() => ({ load: async () => undefined, changed() {}, flush: async () => {}, status: () => ({ dirty: false, failed: false }) })),
     connectionTimeoutMs: 80, qrTimeoutMs: 80, accountTimeoutMs: 80, sendTimeoutMs: options.sendTimeoutMs ?? 80,
     createSession(value) {
       calls.push(['create-session', value.account]); sessionOptions = value;
@@ -97,7 +109,7 @@ async function fixture(t, options = {}) {
   await driver.start(); await nextTurn(); await nextTurn();
   return {
     driver, calls, timeline, sessions, listener: () => listener,
-    async select(info = account) { listener.onQRCodeLoginSucceed(info); await nextTurn(); await nextTurn(); },
+    async select(info = account) { listener.onQRCodeLoginSucceed(info); await nextTurn(); await nextTurn(); if (options.createIndex === createMessageIndex) await waitFor(() => driver.status().session_ready); },
     async online() { sessions[0].online(); await nextTurn(); },
   };
 }
@@ -140,6 +152,7 @@ test('session evidence is published before mapped group text events and duplicat
   const f = await fixture(t); await f.select(); await f.online();
   f.timeline.length = 0;
   f.sessions[0].receive([record(), record(), record({ chatType: 1 }), record({ isImportMsg: true })]);
+  await waitFor(() => f.timeline.some(item => item[0] === 'event'));
   const events = f.timeline.filter(item => item[0] === 'event');
   assert.equal(events.length, 1); assert.equal(events[0][1].message_type, 'group');
   assert.deepEqual(events[0][1].message, [{ type: 'text', data: { text: 'Fixture received text' } }]);
@@ -469,7 +482,7 @@ test('the real session component joins login, dispatcher, native listeners, acco
   assert.equal(driver.status().online, false);
   refs.depends.onMSFStatusChange(1, 0);
   refs.dispatcher.dispatchCall(42, new Uint8Array([1, 2, 3]));
-  await nextTurn();
+  await waitFor(() => events.length === 1);
   assert.equal(driver.status().online, true); assert.equal(events.length, 1);
   assert.equal((await driver.call('get_group_list'))[0].group_id, 10001);
   const result = await driver.call('send_group_msg', { group_id: 10001, message: 'Fixture only; fake native service' });
@@ -494,6 +507,56 @@ test('experimental mutation policy rejects unavailable groups, expired IDs and d
   await assert.rejects(f.driver.call('send_group_msg', { group_id: 10001, message: [{ type: 'at', data: { qq: 'all' } }] }), error => error.retcode === 1404);
   await assert.rejects(f.driver.call('delete_msg', { message_id: 1 }), error => error.retcode === 1404);
   assert.equal(f.calls.some(call => ['send', 'recall'].includes(call[0])), false);
+});
+
+test('persistent context APIs, reply send and recall survive a complete driver recreation', async t => {
+  const profile = await mkdtemp(path.join(os.tmpdir(), 'qqbridge-driver-context-'));
+  const source = record({ msgSeq: '17', senderUid: 'u_fixture_sender' });
+  const nativeRecords = [source];
+  const options = { profile, createIndex: createMessageIndex, experimentalRichMedia: true,
+    msgService: {
+      getLatestDbMsgs() { return { result: 0, msgList: nativeRecords }; },
+      getMsgsByMsgId(peer, ids) { return { result: 0, msgList: nativeRecords.filter(m => ids.includes(m.msgId)) }; },
+      sendMsg(id, peer, elements) { nativeRecords.push(record({ msgId: id, msgSeq: '18', senderUin: account.uin, senderUid: account.uid, elements })); return { result: 0 }; },
+    },
+    groupService: { getAllMemberList(group, refresh) { assert.equal(refresh, true); return { errCode: 0, result: { finish: true, infos: new Map([['u_fixture_sender', { uin: source.senderUin, nick: 'Fixture', role: 4 }]]) } }; } },
+  };
+  const f = await fixture(t, options); await f.select(); await f.online(); await f.driver.call('get_group_list');
+  const history = await f.driver.call('get_group_msg_history', { group_id: 10001 });
+  const originalId = history.messages[0].message_id;
+  const receipt = await f.driver.call('send_group_msg', { group_id: 10001, message: [{ type: 'reply', data: { id: String(originalId) } }, { type: 'text', data: { text: 'Fixture reply' } }] });
+  assert.equal(nativeRecords[1].elements[0].replyElement.replayMsgId, source.msgId);
+  assert.equal((await f.driver.call('get_group_member_info', { group_id: 10001, user_id: source.senderUin })).role, 'owner');
+  await f.driver.stop();
+  const second = await fixture(t, options); await second.select(); await second.online(); await second.driver.call('get_group_list');
+  assert.equal((await second.driver.call('get_msg', { message_id: originalId })).native_message_id, source.msgId);
+  const reply = await second.driver.call('get_msg', { message_id: receipt.message_id });
+  assert.equal(reply.message[0].data.id, String(originalId));
+  await second.driver.call('delete_msg', { message_id: String(receipt.message_id) });
+  assert.equal(second.calls.filter(c => c[0] === 'recall').length, 1);
+  t.after(() => rm(profile, { recursive: true, force: true }));
+});
+
+test('failed persistence suppresses realtime publication and never returns an unpersisted send ID', async t => {
+  const f = await fixture(t, { createIndex: () => ({ load: async () => undefined, changed() {}, flush: async () => { throw new Error('fixture disk failure'); }, status: () => ({ failed: true }) }) });
+  await f.select(); await f.online(); await f.driver.call('get_group_list');
+  f.sessions[0].receive([record()]); await nextTurn(); await nextTurn();
+  assert.equal(f.timeline.filter(c => c[0] === 'event').length, 0);
+  await assert.rejects(f.driver.call('send_group_msg', { group_id: 10001, message: 'fixture' }), /accepted.*persisted.*Do not resend/);
+  assert.equal(f.calls.filter(c => c[0] === 'send').length, 1);
+  assert.equal(f.driver.status().good, false);
+});
+
+test('a disconnect after native acceptance preserves uncertainty and never retries a send', async t => {
+  let accepted;
+  const f = await fixture(t, { sendResult: new Promise(resolve => { accepted = resolve; }) });
+  await f.select(); await f.online(); await f.driver.call('get_group_list');
+  const send = f.driver.call('send_group_msg', { group_id: 10001, message: 'fixture' });
+  await nextTurn();
+  assert.equal(f.calls.filter(c => c[0] === 'send').length, 1);
+  f.listener().onLoginDisConnected(); accepted({ result: 0 });
+  await assert.rejects(send, /accepted.*session changed.*Do not resend/);
+  assert.equal(f.calls.filter(c => c[0] === 'send').length, 1);
 });
 
 test('fresh QR refresh cancels an existing session and ignores only its expected cancellation',async t=>{

@@ -11,6 +11,8 @@ import { recallMessage } from './recall.mjs';
 import { createReceivedMediaCache } from './media-cache.mjs';
 import { createAudioTranscoder } from './audio.mjs';
 import { prepareNativePicture } from './picture-paths.mjs';
+import { createMessageIndex } from './message-index.mjs';
+import { createContextActions, messageAlias } from './context-actions.mjs';
 
 const failure = (message, retcode = 1503) => Object.assign(new Error(message), { retcode });
 const validUin = value => typeof value === 'string' && /^[1-9]\d{4,11}$/.test(value) && Number.isSafeInteger(Number(value));
@@ -46,7 +48,7 @@ function plainText(params) {
  * Dependencies can be injected in tests; there is no environment mock switch. */
 export function createDriverCore({
   native, metadata, profile, prepareProfile, emitEvent = () => {}, emitStatus = () => {},
-  allowedGroups, loginUin = '', experimentalRichMedia = false, createSession = createLinuxSession, persistSelectedAccount = async () => {},
+  allowedGroups, loginUin = '', experimentalRichMedia = false, createSession = createLinuxSession, createIndex = createMessageIndex, persistSelectedAccount = async () => {},
   connectionTimeoutMs = 10000, qrTimeoutMs = 12000, accountTimeoutMs = 12000, sendTimeoutMs = 12000,
 }) {
   if (typeof prepareProfile !== 'function') throw new TypeError('prepareProfile is required.');
@@ -62,6 +64,7 @@ export function createDriverCore({
   let stage = 'created', transportConnected = false, stopped = false, loginFailed = false, observerFailed = false;
   let engine, login, machineId, qr = null, qrPending = null, connectPending = null, lastEvent = null, qrRevision = 0;
   let selectedAccount = null, session = null, mapper = null, generation = 0, sessionAttempted = false;
+  let messageIndex = null, eventTail = Promise.resolve(), queuedEvents = 0;
   let startPromise = null, stopPromise = null, rememberedQuickRequest = null;
   let rememberedSelection = false, userLoggedInUin = null, sessionStartHandle = null;
   let ignoreQrCancellation = false, qrFailure = null, rememberChoice = false, selectionSaveFailed = false, selectionWrite = Promise.resolve();
@@ -86,12 +89,22 @@ export function createDriverCore({
     },
   });
   const accountActions = createAccountActions({ getSession: () => session, getAccount: () => selectedAccount, timeoutMs: accountTimeoutMs });
+  const contextActions = createContextActions({ timeoutMs: Math.min(accountTimeoutMs, 8000), getContext() {
+    if (!mapper || !messageIndex || !session || !status().online) throw failure('QQ account message session is offline.');
+    const activeMapper = mapper, activeIndex = messageIndex, activeSession = session, current = generation;
+    return { mapper: activeMapper, services: activeSession.getServices(), flush: () => activeIndex.flush(),
+      rememberMedia(record) { if (experimentalRichMedia) receivedMedia.remember(record); },
+      check(group) {
+        if (current !== generation || session !== activeSession || !status().online) throw failure('Account session changed during context read.');
+        if (group !== undefined && (!membership.has(group) || (allow && !allow.has(group)))) throw failure('Message group is unavailable or not allowed.', 1403);
+      } };
+  } });
   const sessionState = () => { try { return session?.status() ?? {}; } catch { return {}; } };
   function status() {
     const account = flow.snapshot(), core = sessionState();
     const online = core.online === true && transportConnected && !stopped && !loginFailed;
     return {
-      online, good: online && core.good === true && !observerFailed,
+      online, good: online && core.good === true && !observerFailed && !messageIndex?.status().failed,
       self_id: account.self_id, nickname: account.nickname,
       stage: stopped ? 'stopped' : loginFailed ? stage : online ? 'online' : selectedAccount || account.scan_confirmed || account.account_selected ? account.stage : stage,
       native_loaded: true, transport_connected: transportConnected,
@@ -217,7 +230,11 @@ export function createDriverCore({
       }
       if (stopped || current !== generation || loginFailed || !transportConnected) return;
       const account = { ...selectedAccount };
-      mapper = createMessageMapper({ selfId: account.uin, allowedGroups: allow, richMedia: experimentalRichMedia });
+      const index = createIndex({ profile, accountId: account.uin, snapshot: () => activeMapper.snapshot() });
+      const savedMessages = await index.load();
+      if (stopped || current !== generation) return;
+      const activeMapper = createMessageMapper({ selfId: account.uin, allowedGroups: allow, richMedia: experimentalRichMedia, initialState: savedMessages, onChange: () => index.changed() });
+      messageIndex = index; mapper = activeMapper;
       const isCurrent = () => !stopped && current === generation && selectedAccount?.uin === account.uin && selectedAccount?.uid === account.uid;
       function updateGroups() {
         if (!isCurrent() || deferredGroups === null || !accountActions.updateGroupList(deferredGroups)) return;
@@ -248,11 +265,23 @@ export function createDriverCore({
           }
           if (!status().online) return;
           for (const record of records) {
-            const event = mapper.fromNative(record);
-            if (event) {
-              if (experimentalRichMedia) receivedMedia.remember(record);
-              try { emitEvent(event); } catch { observerFailed = true; notify(); }
-            }
+            const group = groupId(record?.peerUin);
+            if (record?.chatType !== 2 || !group || (allow && !allow.has(group))) continue;
+            if (queuedEvents >= 2500) { observerFailed = true; notify(); continue; }
+            queuedEvents++;
+            eventTail = eventTail.catch(() => {}).then(async () => {
+              try {
+                if (!isCurrent() || !status().online) return;
+                if (experimentalRichMedia && membership.has(group)) await contextActions.hydrateReplies(record);
+                if (!isCurrent() || !status().online) return;
+                const event = activeMapper.fromNative(record);
+                if (!event) return;
+                if (experimentalRichMedia) receivedMedia.remember(record);
+                await index.flush();
+                if (isCurrent() && status().online) emitEvent(event);
+              } catch { observerFailed = true; notify(); }
+              finally { queuedEvents--; }
+            });
           }
         },
         onGroupList(records) {
@@ -375,7 +404,7 @@ export function createDriverCore({
     if (login.connect() === false) throw failure('QQ native login transport refused to connect.');
   }
   return {
-    actions: Object.freeze(['get_login_qrcode', 'get_login_state', 'get_login_info', 'get_group_list', 'send_group_msg', 'upload_group_file', 'delete_msg', 'get_file', 'get_record', 'convert_record']), status,
+    actions: Object.freeze(['get_login_qrcode', 'get_login_state', 'get_login_info', 'get_group_list', 'send_group_msg', 'upload_group_file', 'delete_msg', 'get_file', 'get_record', 'convert_record', 'get_msg', 'get_group_msg_history', 'get_group_member_list', 'get_group_member_info']), status,
     start() {
       if (stopped) return Promise.reject(failure('QQ native driver is stopped.'));
       if (!startPromise) startPromise = startNative().catch(error => { loginFailed = true; stage = 'start_failed'; notify(); throw error; });
@@ -388,8 +417,10 @@ export function createDriverCore({
       if (action === 'get_login_state') return {
         ...account, ...status(), session: sessionState(), last_event: lastEvent, qq_version: metadata.version,
         qr_failure: qrFailure, saved_selection_error: selectionSaveFailed, media_downloads: receivedMedia.status(), audio: audio.status(),
+        message_index: messageIndex?.status() ?? null, context_reads: contextActions.status(),
         remembered_login: { configured: Boolean(loginUin), selected_via_cache: rememberedSelection, lookup_reads: rememberedReads, lookup_pending: rememberedBusy, lookup_limit: maxRememberedReads },
       };
+      if (['get_msg', 'get_group_msg_history', 'get_group_member_list', 'get_group_member_info'].includes(action)) return contextActions.call(action, params);
       if (action === 'get_login_info' || action === 'get_group_list') {
         if (loginFailed || !transportConnected) throw failure('QQ account session is unavailable.');
         const result = await accountActions.call(action, params);
@@ -418,8 +449,8 @@ export function createDriverCore({
       if (action === 'delete_msg') {
         if (!experimentalRichMedia) throw failure('Experimental rich media and recall are disabled.', 1404);
         if (!status().online) throw failure('QQ account message session is offline.');
-        const message = mapper?.lookup(params.message_id);
-        if (!message) throw failure('Message ID is invalid, expired, or belongs to another process.', 1400);
+        const message = mapper?.lookup(messageAlias(params.message_id));
+        if (!message) throw failure('Message ID is invalid or expired.', 1400);
         if ((allow && !allow.has(message.peerUin)) || !membership.has(message.peerUin)) throw failure('Message group is unavailable or not allowed.', 1403);
         return recallMessage({ msgService: session.getServices().msgService, metadata: message, timeoutMs: sendTimeoutMs });
       }
@@ -434,7 +465,7 @@ export function createDriverCore({
         if (allow && !allow.has(group)) throw failure('The group is outside QQBRIDGE_ALLOWED_GROUPS.', 1403);
         if (!groupListObserved) throw failure('A real group list notification is required before sending. Call get_group_list first.');
         if (!membership.has(group)) throw failure('The current account is not an observed member of this group.', 1403);
-        const activeMapper = mapper, activeSession = session, current = generation;
+        const activeMapper = mapper, activeIndex = messageIndex, activeSession = session, current = generation;
         const deadline = Date.now() + sendTimeoutMs;
         const services = activeSession.getServices();
         let preparationTimer, message;
@@ -442,7 +473,8 @@ export function createDriverCore({
           message = rich ? await Promise.race([
             buildGroupSegments({ groupId: group, message: segments, autoEscape: params.auto_escape,
               mediaStore, resolveUid: uin => resolveGroupUid(services.groupService, uin),
-              prepareImage: media => prepareNativePicture({ msgService: services.msgService, profile, media }) }),
+              prepareImage: media => prepareNativePicture({ msgService: services.msgService, profile, media }),
+              resolveReply: async id => (await contextActions.getRecord(id, group)).record }),
             new Promise((_, reject) => { preparationTimer = setTimeout(() => reject(failure('Media preparation timed out; no send was attempted.', 1504)), sendTimeoutMs); }),
           ]) : null;
         } finally { clearTimeout(preparationTimer); }
@@ -452,8 +484,13 @@ export function createDriverCore({
         const result = rich
           ? await sendElements({ msgService: services.msgService, message, timeoutMs: remaining })
           : await sendText({ msgService: services.msgService, groupId: group, text, timeoutMs: remaining });
-        const alias = activeMapper.rememberNative({ chatType: 2, peerUin: group, peerUid: group, msgId: result.native_id });
-        if (!alias) throw failure('QQ accepted the message but a local message ID could not be allocated. Do not resend.', 1500);
+        let alias;
+        try {
+          alias = activeMapper.rememberNative({ chatType: 2, peerUin: group, peerUid: group, msgId: result.native_id });
+          if (!alias) throw new Error('No alias.');
+          await activeIndex.flush();
+        } catch { throw failure('QQ accepted the message but its ID could not be persisted. Do not resend.', 1500); }
+        if (current !== generation || activeSession !== session || !status().online) throw failure('QQ accepted the message but the account session changed. Do not resend.', 1500);
         return { message_id: alias };
       }
       if (action !== 'get_login_qrcode') throw failure('Unsupported QQ native action.', 1404);
@@ -483,10 +520,11 @@ export function createDriverCore({
     stop() {
       if (stopPromise) return stopPromise;
       stopped = true; transportConnected = false; stage = 'stopped'; generation++;
-      flow.stop(); accountActions.close(); audio.close(); cancelRememberedRead?.(); rejectPending(failure('QQ native driver stopped.'));
+      flow.stop(); accountActions.close(); contextActions.close(); audio.close(); cancelRememberedRead?.(); rejectPending(failure('QQ native driver stopped.'));
       clearImmediate(sessionStartHandle); sessionStartHandle = null;
       stopPromise = (async () => {
         try { await selectionWrite; } catch {}
+        try { await eventTail; await messageIndex?.flush(); } catch {}
         try { await receivedMedia.flush(); } catch {}
         receivedMedia.clear();
         try { await session?.stop(); } catch {}

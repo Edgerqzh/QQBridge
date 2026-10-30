@@ -22,10 +22,10 @@ export function receivedSegments(elements, resolveReply = () => null) {
       if (!id) return null;
       message.push({ type: 'record', data: { file: id } });
     } else if (element?.elementType === 7 && element.replyElement) {
-      const id = resolveReply(element.replyElement.replayMsgId);
+      const id = resolveReply(element.replyElement.replayMsgId, element.replyElement);
       if (Number.isInteger(id) && id > 0) message.push({ type: 'reply', data: { id: String(id) } });
-      // An unknown process-local reference cannot be invented. Keep the rest
-      // of the real message, including mentions, without claiming a reply ID.
+      // Preserve visible content if the native database cannot resolve a
+      // source; never invent an alias from an unusable foreign-client ID.
     } else return null;
   }
   if (!message.length) return null;

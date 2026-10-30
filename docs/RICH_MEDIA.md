@@ -1,5 +1,6 @@
 # 富媒体、提及与撤回（实验阶段）
 
+当前 0.4 消息查询、历史、群成员和可跨重启的消息 ID 规则见 [上下文说明](CONTEXT.md)；以下早期验证记录中进程内 ID 的限制已被该版本替代。
 此迭代基于官方 Linux QQ 3.2.34-53644 x64。默认保留已验证文本能力；在本机 `.env` 设置 `QQBRIDGE_EXPERIMENTAL_RICH_MEDIA=1` 后重启 runtime，或重新创建完整原生 Compose 服务，启用本页能力。
 
 ## 能力和界限
@@ -37,7 +38,7 @@
 
 文件段使用 `{"type":"file","data":{"file":"base64://...","name":"example.txt"}}`。
 语音段使用 `{"type":"record","data":{"file":"base64://...","duration":2}}`。
-撤回使用 `{"action":"delete_msg","params":{"message_id":1}}`，其中 ID 必须来自当前运行进程。
+撤回使用 `{"action":"delete_msg","params":{"message_id":1}}`，其中 ID 必须来自当前账号尚在持久化窗口内的事件、发送回执或查询结果。
 
 预处理和发送共用有界超时；等待 UID 或磁盘读取超时后不会继续发送。发送、撤回失败均不自动重试。ACK 成功仅表示受理，不作为普遍的最终送达保证。
 

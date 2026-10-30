@@ -1,11 +1,13 @@
 const fail = (message, retcode = 1400) => Object.assign(new Error(message), { retcode });
-export async function buildGroupSegments({ groupId, message, autoEscape, mediaStore, resolveUid, prepareImage }) {
+export async function buildGroupSegments({ groupId, message, autoEscape, mediaStore, resolveUid, prepareImage, resolveReply }) {
   if (autoEscape !== undefined && typeof autoEscape !== 'boolean') throw fail('auto_escape must be boolean.');
   if (typeof message === 'string') {
     if (autoEscape !== true && message.includes('[CQ:')) throw fail('CQ parsing is unsupported; use message segment arrays.', 1404);
     message = [{ type: 'text', data: { text: message } }];
   }
   if (!Array.isArray(message) || !message.length || message.length > 64) throw fail('message needs 1 to 64 segments.');
+  const replies = message.filter(segment => segment?.type === 'reply');
+  if (replies.length > 1 || (replies.length && (message[0]?.type !== 'reply' || message.length < 2))) throw fail('A single reply must be the first segment and include message content.');
   const elements = []; let textBytes = 0;
   for (const segment of message) {
     if (!segment || typeof segment !== 'object' || !segment.data || typeof segment.data !== 'object') throw fail('Invalid message segment.');
@@ -14,6 +16,20 @@ export async function buildGroupSegments({ groupId, message, autoEscape, mediaSt
       if (typeof data.text !== 'string' || !data.text.length) throw fail('Text segment must not be empty.');
       textBytes += Buffer.byteLength(data.text);
       elements.push({ elementType: 1, elementId: '0', textElement: { content: data.text, atType: 0 } });
+    } else if (segment.type === 'reply') {
+      if (typeof resolveReply !== 'function') throw fail('Reply lookup is unavailable.', 1503);
+      const source = await resolveReply(data.id);
+      if (source?.chatType !== 2 || String(source.peerUin) !== String(groupId) || !/^[1-9]\d{0,63}$/.test(source.msgId) || !/^[1-9]\d{0,63}$/.test(source.msgSeq) || !/^[1-9]\d{4,11}$/.test(source.senderUin) || typeof source.senderUid !== 'string' || !/^u_[A-Za-z0-9_-]{1,126}$/.test(source.senderUid) || !/^\d{1,12}$/.test(String(source.msgTime))) throw fail('Reply target has no usable native source metadata.', 1404);
+      // Populate the SDK's reply element from the actual source record. The
+      // numeric senderUid and NT senderUidStr are distinct native fields.
+      const sourceText = (source.elements ?? []).filter(element => element.elementType === 1 && typeof element.textElement?.content === 'string').map(element => element.textElement.content).join('').slice(0, 4096);
+      elements.push({ elementType: 7, elementId: '0', replyElement: {
+        replayMsgId: source.msgId, replayMsgSeq: source.msgSeq, replayMsgRootSeq: '0', replayMsgRootMsgId: '0', replayMsgRootCommentCnt: '0',
+        sourceMsgIdInRecords: source.msgId, sourceMsgText: '', sourceMsgTextElems: sourceText ? [{ replyAbsElemType: 1, textElemContent: sourceText, faceElem: null, picElem: null }] : [],
+        senderUid: source.senderUin, senderUidStr: source.senderUid,
+        replyMsgClientSeq: /^\d{1,20}$/.test(source.clientSeq) ? source.clientSeq : '0', replyMsgTime: String(source.msgTime), replyMsgRevokeType: 0,
+        sourceMsgIsIncPic: source.elements?.some(element => element.elementType === 2) ?? false, sourceMsgExpired: false, anonymousNickName: '', originalMsgState: 0,
+      } });
     } else if (segment.type === 'at') {
       const all = data.qq === 'all', uin = String(data.qq);
       if (!all && !/^[1-9]\d{4,11}$/.test(uin)) throw fail('at.qq must be a QQ account number or all.');

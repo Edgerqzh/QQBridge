@@ -57,11 +57,11 @@ function nickname(record) {
 function cqText(text) { return text.replaceAll('&', '&amp;').replaceAll('[', '&#91;').replaceAll(']', '&#93;'); }
 
 /**
- * Map realtime group text records to OneBot 11 events without retaining bodies.
- * IDs and deduplication state are process-local and FIFO-bounded by capacity.
+ * Map group records to events and query results without retaining bodies.
+ * IDs and deduplication are FIFO bounded; optional snapshots preserve them.
  * rememberNative allocates an alias but does not mark an event as emitted.
  */
-export function createMessageMapper({ selfId, allowedGroups, capacity = 5000, richMedia = false } = {}) {
+export function createMessageMapper({ selfId, allowedGroups, capacity = 5000, richMedia = false, initialState, onChange = () => {} } = {}) {
   if (!Number.isInteger(capacity) || capacity < 1 || capacity > MAX_ALIAS) throw new RangeError('capacity must be a positive int32 integer');
   if (typeof selfId !== 'function' && !numericIdentity(selfId)) throw new TypeError('selfId must be a positive safe integer identity or getter');
   let allow;
@@ -76,13 +76,28 @@ export function createMessageMapper({ selfId, allowedGroups, capacity = 5000, ri
   }
   const byNative = new Map();
   const byAlias = new Map();
+  const bySequence = new Map();
   let nextAlias = 1;
+
+  if (initialState !== undefined) {
+    if (initialState?.version !== 1 || !Number.isInteger(initialState.nextAlias) || initialState.nextAlias < 1 || initialState.nextAlias > MAX_ALIAS + 1 || !Array.isArray(initialState.entries) || initialState.entries.length > capacity) throw new Error('Invalid message index snapshot.');
+    const seenAliases = new Set(), seenKeys = new Set();
+    for (const saved of initialState.entries) {
+      const parsed = metadata(saved?.metadata);
+      if (!parsed || !Number.isInteger(saved.alias) || saved.alias < 1 || saved.alias >= initialState.nextAlias || typeof saved.emitted !== 'boolean' || seenAliases.has(saved.alias) || seenKeys.has(parsed.key)) throw new Error('Invalid message index entry.');
+      seenAliases.add(saved.alias); seenKeys.add(parsed.key);
+      byNative.set(parsed.key, saved.alias);
+      byAlias.set(saved.alias, { key: parsed.key, metadata: parsed.value, emitted: saved.emitted });
+      if (parsed.value.msgSeq && parsed.value.msgSeq !== '0') bySequence.set(`${parsed.peer.text}:${parsed.value.msgSeq}`, saved.alias);
+    }
+    nextAlias = initialState.nextAlias;
+  }
 
   function metadata(record) {
     if (!record || typeof record !== 'object' || Array.isArray(record) || record.chatType !== 2) return null;
     const peer = numericIdentity(record.peerUin);
     const msgId = nativeIdentifier(record.msgId);
-    if (!peer || !msgId || (allow && !allow.has(peer.text))) return null;
+    if (!peer || !msgId) return null;
     const value = { chatType: 2, peerUin: peer.text, msgId };
     if (typeof record.peerUid === 'string' && record.peerUid.length > 0 && record.peerUid.length <= 256 && !/[\u0000-\u001f\u007f]/.test(record.peerUid)) value.peerUid = record.peerUid;
     const msgSeq = sequenceIdentifier(record.msgSeq);
@@ -91,30 +106,48 @@ export function createMessageMapper({ selfId, allowedGroups, capacity = 5000, ri
   }
 
   function remember(parsed) {
+    if (allow && !allow.has(parsed.peer.text)) return null;
     const existing = byNative.get(parsed.key);
     if (existing !== undefined) {
       const entry = byAlias.get(existing);
-      entry.metadata = { ...entry.metadata, ...parsed.value };
+      const updated = { ...entry.metadata, ...parsed.value };
+      if (entry.metadata.msgSeq !== updated.msgSeq && bySequence.get(`${parsed.peer.text}:${entry.metadata.msgSeq}`) === existing) bySequence.delete(`${parsed.peer.text}:${entry.metadata.msgSeq}`);
+      if (JSON.stringify(updated) !== JSON.stringify(entry.metadata)) { entry.metadata = updated; onChange(); }
+      if (updated.msgSeq && updated.msgSeq !== '0') bySequence.set(`${parsed.peer.text}:${updated.msgSeq}`, existing);
       return existing;
     }
+    // Never reuse an evicted alias. Old application references must fail rather
+    // than silently target another message, including across process restarts.
+    if (nextAlias > MAX_ALIAS) throw new Error('Message ID space exhausted.');
     if (byAlias.size >= capacity) {
       const oldestAlias = byAlias.keys().next().value;
       const oldest = byAlias.get(oldestAlias);
       byAlias.delete(oldestAlias);
       byNative.delete(oldest.key);
+      if (bySequence.get(`${oldest.metadata.peerUin}:${oldest.metadata.msgSeq}`) === oldestAlias) bySequence.delete(`${oldest.metadata.peerUin}:${oldest.metadata.msgSeq}`);
     }
-    while (byAlias.has(nextAlias)) nextAlias = nextAlias === MAX_ALIAS ? 1 : nextAlias + 1;
     const alias = nextAlias;
-    nextAlias = nextAlias === MAX_ALIAS ? 1 : nextAlias + 1;
+    nextAlias++;
     byNative.set(parsed.key, alias);
     byAlias.set(alias, { key: parsed.key, metadata: { ...parsed.value }, emitted: false });
+    if (parsed.value.msgSeq && parsed.value.msgSeq !== '0') bySequence.set(`${parsed.peer.text}:${parsed.value.msgSeq}`, alias);
+    onChange();
     return alias;
+  }
+
+  function content(record, parsed) {
+    return richMedia ? receivedSegments(record.elements, (nativeId, reply) => {
+      const bySeq = bySequence.get(`${parsed.peer.text}:${reply?.replayMsgSeq}`);
+      if (bySeq !== undefined) return bySeq;
+      if (!nativeIdentifier(nativeId)) return null;
+      return remember(metadata({ chatType: 2, peerUin: parsed.peer.text, peerUid: parsed.value.peerUid, msgId: nativeId, msgSeq: reply?.replayMsgSeq }));
+    }) : (() => { const text = textContent(record.elements); return text === null ? null : { message: [{ type: 'text', data: { text } }], raw: cqText(text) }; })();
   }
 
   return {
     fromNative(record) {
       const parsed = metadata(record);
-      if (!parsed || record.isOnlineMsg !== true || record.isImportMsg !== false) return null;
+      if (!parsed || (allow && !allow.has(parsed.peer.text)) || record.isOnlineMsg !== true || record.isImportMsg !== false) return null;
       let own;
       try { own = numericIdentity(typeof selfId === 'function' ? selfId() : selfId); } catch { return null; }
       const sender = numericIdentity(record.senderUin);
@@ -123,20 +156,35 @@ export function createMessageMapper({ selfId, allowedGroups, capacity = 5000, ri
       // seconds compatibility fallback when the native field is absent.
       const time = timestamp(record.msgTime === undefined ? record.time : record.msgTime);
       if (time === null) return null;
-      const rich = richMedia ? receivedSegments(record.elements, nativeId => byNative.get(`2:${parsed.peer.text}:${nativeId}`)) : null;
-      const text = richMedia ? null : textContent(record.elements);
-      if (richMedia ? rich === null : text === null) return null;
+      const rich = content(record, parsed);
+      if (rich === null) return null;
       const alias = remember(parsed);
       const entry = byAlias.get(alias);
       if (entry.emitted) return null;
       entry.emitted = true;
+      onChange();
       return {
         time, self_id: own.value, post_type: 'message', message_type: 'group', sub_type: 'normal',
         message_id: alias, group_id: parsed.peer.value, user_id: sender.value,
-        anonymous: null, message: rich?.message ?? [{ type: 'text', data: { text } }], raw_message: rich?.raw ?? cqText(text), font: 0,
+        anonymous: null, message: rich.message, raw_message: rich.raw, font: 0,
         sender: { user_id: sender.value, nickname: nickname(record) },
       };
     },
+    toMessage(record) {
+      const parsed = metadata(record), sender = numericIdentity(record?.senderUin);
+      const time = timestamp(record?.msgTime === undefined ? record?.time : record.msgTime);
+      if (!parsed || !sender || time === null || (allow && !allow.has(parsed.peer.text))) return null;
+      const rich = content(record, parsed);
+      if (!rich) return null;
+      const alias = remember(parsed);
+      return { time, message_type: 'group', message_id: alias, real_id: alias, group_id: parsed.peer.value,
+        message_seq: parsed.value.msgSeq ?? null, native_message_id: parsed.value.msgId,
+        sender: { user_id: sender.value, nickname: nickname(record) }, message: rich.message, raw_message: rich.raw };
+    },
+    snapshot() {
+      return { version: 1, nextAlias, entries: [...byAlias].map(([alias, entry]) => ({ alias, metadata: { ...entry.metadata }, emitted: entry.emitted })) };
+    },
+    lookupSequence(group, sequence) { return bySequence.get(`${group}:${sequence}`) ?? null; },
     rememberNative(record) {
       const parsed = metadata(record);
       return parsed ? remember(parsed) : null;

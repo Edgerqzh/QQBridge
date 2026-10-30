@@ -2,7 +2,7 @@ import { NativeSendError } from './send-text.mjs';
 
 export async function recallMessage({ msgService, metadata, timeoutMs = 12000 }) {
   if (!metadata || metadata.chatType !== 2 || !/^[1-9]\d*$/.test(metadata.msgId) || !/^[1-9]\d*$/.test(metadata.peerUin))
-    throw new NativeSendError('INVALID_MESSAGE', 'The process-local message ID is unavailable or expired.', { retcode: 1400 });
+    throw new NativeSendError('INVALID_MESSAGE', 'The message ID is unavailable or expired.', { retcode: 1400 });
   if (typeof msgService?.recallMsg !== 'function') throw new NativeSendError('RECALL_UNAVAILABLE', 'Native recall is unavailable.', { retcode: 1503 });
   let timer, result;
   try {

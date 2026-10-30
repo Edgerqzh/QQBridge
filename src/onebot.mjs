@@ -6,7 +6,7 @@ const ONLINE_ACTIONS = new Set([
   'set_group_anonymous', 'set_group_card', 'set_group_name', 'set_group_leave',
   'set_group_special_title', 'set_friend_add_request', 'set_group_add_request',
   'get_stranger_info', 'get_friend_list', 'get_group_info',
-  'get_group_member_info', 'get_group_member_list',
+  'get_group_member_info', 'get_group_member_list', 'get_group_msg_history',
   'get_group_honor_info', 'get_cookies', 'get_csrf_token', 'get_credentials',
 ]);
 
