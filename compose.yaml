@@ -1,0 +1,20 @@
+services:
+  gateway:
+    build: .
+    init: true
+    restart: unless-stopped
+    environment:
+      QQBRIDGE_HOST: 0.0.0.0
+      QQBRIDGE_PORT: "5700"
+      QQBRIDGE_TOKEN: ${QQBRIDGE_TOKEN:?Set QQBRIDGE_TOKEN to a random access token}
+      QQBRIDGE_BRIDGE_HOST: 127.0.0.1
+      QQBRIDGE_BRIDGE_PORT: "5711"
+      QQBRIDGE_BRIDGE_TOKEN: ${QQBRIDGE_BRIDGE_TOKEN:?Set a separate QQBRIDGE_BRIDGE_TOKEN}
+      QQBRIDGE_REVERSE_WS_URL: ${QQBRIDGE_REVERSE_WS_URL:-}
+      QQBRIDGE_REVERSE_WS_TOKEN: ${QQBRIDGE_REVERSE_WS_TOKEN:-}
+    ports:
+      - "127.0.0.1:5700:5700"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL

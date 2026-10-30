@@ -1,0 +1,49 @@
+FROM node:24-bookworm-slim
+
+ARG TARGETARCH
+RUN test "$TARGETARCH" = amd64 || { printf '%s\n' 'The native QQ host currently supports linux/amd64 only.' >&2; exit 1; }
+
+ENV NODE_ENV=production \
+    QQBRIDGE_HOST=0.0.0.0 \
+    QQBRIDGE_PORT=5700 \
+    QQBRIDGE_BRIDGE_HOST=127.0.0.1 \
+    QQBRIDGE_BRIDGE_PORT=5711 \
+    QQBRIDGE_QQ_APP=/opt/qq/extracted/opt/QQ/resources/app \
+    QQBRIDGE_QQ_PROFILE=/app/data/qq-profile
+
+WORKDIR /app
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+       gcc libc6-dev libgnutls30 libx11-6 libx11-xcb1 libxext6 libuuid1 \
+       libgssapi-krb5-2 libgcrypt20 ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY package*.json ./
+RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund \
+    && npm cache clean --force
+
+COPY scripts/prepare-linux-qq.mjs ./scripts/prepare-linux-qq.mjs
+
+# Download directly from QQ's official metadata and signing endpoints. No
+# third-party bridge package or binary is used. A future unsupported QQ
+# release fails the exact build check instead of claiming compatibility.
+RUN node scripts/prepare-linux-qq.mjs --destination /opt/qq --arch x64 --extract \
+    && node -e 'const fs=require("node:fs");const p=require("/opt/qq/extracted/opt/QQ/resources/app/package.json");if(p.version!=="3.2.34-53644"||p.platform!=="linux"||p.eleArch!=="x64")throw new Error("Unsupported official QQ build: this image requires Linux QQ 3.2.34-53644 x64.");for(const name of fs.readdirSync("/opt/qq"))if(name.endsWith(".deb"))fs.unlinkSync("/opt/qq/"+name);' \
+    && mkdir -p /app/data \
+    && chown node:node /app/data \
+    && chmod 700 /app/data
+
+# Keep the large, verified QQ preparation layer reusable across source edits.
+COPY src ./src
+COPY scripts ./scripts
+COPY LICENSE ./
+
+USER node
+EXPOSE 5700
+
+# A connected native runtime waiting for the user's QR login is healthy.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=45s --retries=3 \
+  CMD ["node", "-e", "fetch('http://127.0.0.1:5700/get_login_state',{method:'POST',headers:{authorization:'Bearer '+process.env.QQBRIDGE_TOKEN,'content-type':'application/json'},body:'{}',signal:AbortSignal.timeout(3000)}).then(async r=>{const v=await r.json();process.exit(r.ok&&v.status==='ok'?0:1)}).catch(()=>process.exit(1))"]
+
+CMD ["node", "scripts/run-container.mjs"]

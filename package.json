@@ -1,0 +1,19 @@
+{
+  "name": "qqbridge",
+  "version": "0.1.0-dev.1",
+  "description": "Independent QQ client bridge research prototype with a OneBot 11 gateway",
+  "type": "module",
+  "private": true,
+  "license": "MIT",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "start": "node --env-file-if-exists=.env src/cli.mjs start",
+    "init": "node src/cli.mjs init",
+    "doctor": "node --env-file-if-exists=.env src/cli.mjs doctor",
+    "runtime": "node --env-file-if-exists=.env src/runtime-cli.mjs",
+    "qrcode": "node --env-file-if-exists=.env scripts/get-qrcode.mjs",
+    "prepare:qq": "node scripts/prepare-linux-qq.mjs",
+    "test": "node --test test/*.test.mjs"
+  },
+  "dependencies": { "ws": "^8.18.3" }
+}
