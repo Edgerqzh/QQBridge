@@ -17,6 +17,8 @@ import { createNoticeMapper } from './notices.mjs';
 import { createRecoveryController } from './recovery.mjs';
 import { createFriendActions } from './friends.mjs';
 import { createPrivateActions } from './private-actions.mjs';
+import { createGroupManagement, GROUP_MANAGEMENT_ACTIONS } from './group-management.mjs';
+import { createSocialActions, SOCIAL_ACTIONS } from './social-actions.mjs';
 
 const failure = (message, retcode = 1503) => Object.assign(new Error(message), { retcode });
 const validUin = value => typeof value === 'string' && /^[1-9]\d{4,11}$/.test(value) && Number.isSafeInteger(Number(value));
@@ -112,6 +114,12 @@ export function createDriverCore({
   }
   const friendActions=createFriendActions({getContext:privateContext,allowedUsers:userAllow,timeoutMs:Math.min(accountTimeoutMs,8000)});
   const privateActions=createPrivateActions({getContext:privateContext,timeoutMs:Math.min(accountTimeoutMs,8000)});
+  function managementContext(){
+    const c=privateContext();
+    return {...c,groups:()=>session.getGroups(),check(group){c.check();if(group!==undefined&&(!groupListObserved||!membership.has(group)||allow&&!allow.has(group)))throw failure('Management group is unavailable or outside the allowlist.',1403);}};
+  }
+  const groupManagement=createGroupManagement({getContext:managementContext,timeoutMs:Math.min(accountTimeoutMs,8000)});
+  const socialActions=createSocialActions({getContext:privateContext,profile,allowedUsers:userAllow,emitEvent,timeoutMs:Math.min(accountTimeoutMs,8000)});
   const contextActions = createContextActions({ timeoutMs: Math.min(accountTimeoutMs, 8000), getContext() {
     if (!mapper || !messageIndex || !session || !status().online) throw failure('QQ account message session is offline.');
     const activeMapper = mapper, activeIndex = messageIndex, activeSession = session, current = generation;
@@ -145,6 +153,7 @@ export function createDriverCore({
   function clearAccount() {
     receivedMedia.clear();
     friendActions.invalidate();
+    socialActions.invalidate();
     noticeMapper?.close();
     generation++; selectedAccount = null; mapper = null; membership.clear(); groupListObserved = false; deferredGroups = null;
     rememberedSelection = false; userLoggedInUin = null;
@@ -339,6 +348,7 @@ export function createDriverCore({
             previousMembership = new Set(membership); membership.clear(); groupListObserved = false;
             accountActions.invalidate(); activeNotices.invalidate();
             friendActions.invalidate();
+            socialActions.invalidate();
           }
           if (!wasOnline && online && everOnline) {
             queueMicrotask(() => {
@@ -346,7 +356,7 @@ export function createDriverCore({
               try { Promise.resolve(session.getServices().groupService.getGroupList(true)).catch(() => {}); } catch {}
             });
           }
-          if(!wasOnline&&online)queueMicrotask(()=>{if(isCurrent())friendActions.load(true).catch(()=>{});});
+          if(!wasOnline&&online)queueMicrotask(()=>{if(isCurrent()){friendActions.load(true).catch(()=>{});socialActions.call('get_friend_requests',{}).catch(()=>{});}});
           wasOnline = online;
           everOnline ||= online;
           recovery.observe({ online, sessionReady: state.session_ready === true, reason: 'msf_disconnected' });
@@ -363,6 +373,7 @@ export function createDriverCore({
         },
         onMessageUpdate: records => queueRecords(records, true),
         onFriendList(rows){if(isCurrent())friendActions.update(rows);},
+        onFriendRequests(rows){if(isCurrent())socialActions.receive(rows);},
         onAuthenticationRequired(reason) {
           if (!isCurrent()) return;
           loginFailed = true; transportInvalidated = true; stage = 'authentication_required';
@@ -493,7 +504,7 @@ export function createDriverCore({
     if (login.connect() === false) throw failure('QQ native login transport refused to connect.');
   }
   return {
-    actions: Object.freeze(['get_login_qrcode', 'get_login_state', 'get_login_info', 'get_group_list', 'send_group_msg', 'upload_group_file', 'delete_msg', 'get_file', 'get_record', 'convert_record', 'get_msg', 'get_group_msg_history', 'get_group_member_list', 'get_group_member_info', 'get_friend_list', 'get_friend_info', 'get_stranger_info', 'send_private_msg', 'send_msg', 'get_friend_msg_history', 'get_private_msg_history', 'upload_private_file']), status,
+    actions: Object.freeze(['get_login_qrcode', 'get_login_state', 'get_login_info', 'get_group_list', 'send_group_msg', 'upload_group_file', 'delete_msg', 'get_file', 'get_record', 'convert_record', 'get_msg', 'get_group_msg_history', 'get_group_member_list', 'get_group_member_info', 'get_friend_list', 'get_friend_info', 'get_stranger_info', 'send_private_msg', 'send_msg', 'get_friend_msg_history', 'get_private_msg_history', 'upload_private_file',...GROUP_MANAGEMENT_ACTIONS,...SOCIAL_ACTIONS]), status,
     start() {
       if (stopped) return Promise.reject(failure('QQ native driver is stopped.'));
       if (!startPromise) startPromise = startNative().catch(error => { loginFailed = true; stage = 'start_failed'; notify(); throw error; });
@@ -509,8 +520,11 @@ export function createDriverCore({
         message_index: messageIndex?.status() ?? null, context_reads: contextActions.status(),
         notices: noticeMapper?.status() ?? null, recovery: { ...recovery.status(), manual_reason: manualRecoveryReason || null },
         friends:friendActions.status(),private_reads:privateActions.status(),
+        group_management:groupManagement.status(),friend_requests:socialActions.status(),
         remembered_login: { configured: Boolean(loginUin), selected_via_cache: rememberedSelection, lookup_reads: rememberedReads, lookup_pending: rememberedBusy, lookup_limit: maxRememberedReads },
       };
+      if(GROUP_MANAGEMENT_ACTIONS.includes(action))return groupManagement.call(action,params);
+      if(SOCIAL_ACTIONS.includes(action))return socialActions.call(action,params);
       if(action==='send_msg'){
         const type=params.message_type??(params.group_id!==undefined&&params.user_id===undefined?'group':params.user_id!==undefined&&params.group_id===undefined?'private':null);
         if(!['group','private'].includes(type)||type==='group'&&params.user_id!==undefined||type==='private'&&params.group_id!==undefined)throw failure('send_msg needs one unambiguous group or private target.',1400);
@@ -637,7 +651,7 @@ export function createDriverCore({
     stop() {
       if (stopPromise) return stopPromise;
       stopped = true; transportConnected = false; stage = 'stopped'; generation++;
-      recovery.stop(); noticeMapper?.close(); friendActions.close(); privateActions.close(); flow.stop(); accountActions.close(); contextActions.close(); audio.close(); cancelRememberedRead?.(); rejectPending(failure('QQ native driver stopped.'));
+      recovery.stop(); noticeMapper?.close(); friendActions.close(); privateActions.close(); groupManagement.close();socialActions.close();flow.stop(); accountActions.close(); contextActions.close(); audio.close(); cancelRememberedRead?.(); rejectPending(failure('QQ native driver stopped.'));
       clearImmediate(sessionStartHandle); sessionStartHandle = null;
       stopPromise = (async () => {
         try { await selectionWrite; } catch {}

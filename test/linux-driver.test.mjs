@@ -98,7 +98,8 @@ async function fixture(t, options = {}) {
           return { ...state, online: state.forcedOffline ? false : online, good: state.forcedOffline ? false : online };
         },
         authenticationEvidence: () => value.getAuthenticationEvidence(),
-        getServices: () => ({ msgService, groupService, buddyService: options.friendList ? {getBuddyList(){value.onFriendList(options.friendList);return {result:0};}} : undefined }),
+        getServices: () => ({ msgService, groupService, buddyService: options.buddyService??(options.friendList ? {getBuddyList(){value.onFriendList(options.friendList);return {result:0};}} : undefined),addBuddyService:options.addBuddyService }),
+        getGroups:()=>options.groups??groups,
         online() { Object.assign(state, { forcedOffline: false, session_ready: true, online: true, good: true, online_message_observed: true, msf_status: 1, msf_error: 0 }); value.onState({ ...state }); },
         offline() { Object.assign(state, { forcedOffline: true, online: false, good: false, msf_status: 0 }); value.onState({ ...state }); },
         updates(raw) { value.onMessageUpdate(raw); },
@@ -134,6 +135,20 @@ test('QR confirmation starts quick login and the exact account session once with
   assert.equal(state.authenticated_evidence, 'native_online_message');
   assert.deepEqual(await f.driver.call('get_login_info'), { user_id: Number(account.uin), nickname: account.nickName });
   await assert.rejects(f.driver.call('get_login_qrcode'), { retcode: 1409 });
+});
+
+test('management actions route through driver scope checks and current group permissions',async t=>{
+  const mutations=[];const f=await fixture(t,{allowedGroups:new Set(['10001']),groupService:{
+    getAllMemberList:()=>({errCode:0,result:{finish:true,infos:new Map([[account.uid,{...account,role:2}]])}}),
+    modifyMemberCardName:(...args)=>{mutations.push(args);return {result:0};},
+  }});
+  await f.select();await f.online();await f.driver.call('get_group_list');
+  assert.equal((await f.driver.call('get_group_info',{group_id:10001})).member_count,1);
+  await f.driver.call('set_group_card',{group_id:10001,user_id:account.uin,card:'Fixture'});
+  assert.deepEqual(mutations,[['10001',account.uid,'Fixture']]);
+  await assert.rejects(f.driver.call('set_group_name',{group_id:10001,group_name:'Fixture'}),{retcode:1403});
+  await assert.rejects(f.driver.call('set_group_card',{group_id:10002,user_id:account.uin,card:'Fixture'}),{retcode:1403});
+  f.sessions[0].offline();await assert.rejects(f.driver.call('set_group_card',{group_id:10001,user_id:account.uin,card:'Fixture'}),{retcode:1503});
 });
 
 test('missing QR uid is read from the exact same account in the verified login-list wrapper', async t => {

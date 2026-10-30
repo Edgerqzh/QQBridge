@@ -2,7 +2,7 @@
 
 QQBridge 是针对单一 Linux QQ 构建的普通账号文本收发 MVP。代码能力、自动化测试和真实 QQ 验证分别记录，不将替身后端当作 QQ 接入证据。
 
-新增实验能力见 [富媒体说明](RICH_MEDIA.md)。下表保留首个文本版本的基线覆盖。
+后续能力见 [富媒体说明](RICH_MEDIA.md)、[查询与引用](CONTEXT.md)、[好友私聊](PRIVATE.md) 和 [好友申请与群管理](MANAGEMENT.md)。下表保留首个文本版本的基线覆盖。
 
 ## 当前范围
 
@@ -22,7 +22,7 @@ QQBridge 是针对单一 Linux QQ 构建的普通账号文本收发 MVP。代码
 | 仅网关 Docker | 原 `Dockerfile` / `compose.yaml`，不含 QQ runtime | 普通用户、回环发布和离线状态检查通过 |
 | 官方包准备 | 官方配置、受限域名下载、可选解压、摘要回执 | 完整脚本下载及解压成功，187185496 字节 |
 
-对外原生动作范围为 `get_login_qrcode`、`get_login_state`、`get_login_info`、`get_group_list`、`send_group_msg`。泛用 `send_msg` 封装尚未实现。
+首个文本版本的原生动作范围为 `get_login_qrcode`、`get_login_state`、`get_login_info`、`get_group_list`、`send_group_msg`。0.6 已补充泛用 `send_msg`，后续接口见上面的分项文档。
 
 可选群白名单同时限制群列表、接收和发送。发送只接受字符串或全 `text` 段数组；不解析 CQ，含 CQ 外观的字符串需显式 `auto_escape: true` 才按字面处理。成功返回本进程的 `message_id` 别名，不对外输出原生 19 位 ID。
 

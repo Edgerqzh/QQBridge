@@ -19,6 +19,8 @@ async function fixture(t, overrides = {}) {
     removeKernelGroupListener(value) { assert.equal(value, state.groupListener); state.groupRemoved = true; },
   };
   const session = {
+    getBuddyService:()=>overrides.buddyService,
+    getAddBuddyService:()=>overrides.addBuddyService,
     init(config, depends, dispatcher, listener) {
       order.push('init'); Object.assign(state, { config, depends, dispatcher, listener });
       overrides.onInit?.(state);
@@ -67,6 +69,13 @@ test('native recall updates are forwarded separately and cannot invent online ev
   const updates=[];const f=await fixture(t,{options:{onMessageUpdate:r=>updates.push(r)}});await f.core.start();
   f.state.msgListener.onMsgInfoListUpdate([{recallTime:'1800000000'}]);
   assert.equal(updates.length,1);assert.equal(f.core.status().online,false);assert.equal(f.core.status().online_message_observed,false);
+});
+
+test('buddy request listener forwards real callbacks and detaches when stopped',async t=>{
+  let listener,removed=false;const received=[],addBuddyService={};
+  const f=await fixture(t,{addBuddyService,buddyService:{addKernelBuddyListener:l=>listener=l,removeKernelBuddyListener:l=>{assert.equal(l,listener);removed=true;}},options:{onFriendRequests:r=>received.push(r)}});
+  await f.core.start();const row={buddyReqs:[]};listener.onBuddyReqChange(row);assert.deepEqual(received,[row]);assert.equal(f.core.getServices().addBuddyService,addBuddyService);
+  await f.core.stop();listener.onBuddyReqChange(row);assert.equal(received.length,1);assert.equal(removed,true);
 });
 
 test('kicked-offline and SSO authentication failures revoke online status and notify once', async t => {

@@ -61,7 +61,7 @@ const shape = value => {
  */
 export function createLinuxSession({
   native, engine, account, profile, metadata, machineId,
-  onState = () => {}, onMessage, onMessageUpdate, onGroupList, onFriendList, onAuthenticationRequired, onUnsupportedDependency = () => {},
+  onState = () => {}, onMessage, onMessageUpdate, onGroupList, onFriendList, onFriendRequests, onAuthenticationRequired, onUnsupportedDependency = () => {},
   forwardDispatcher, initTimeoutMs = 20000, getAuthenticationEvidence = () => false, getAuthenticationEvidenceType = () => 'native_login_result',
 }) {
   if (typeof account?.uin !== 'string' || !/^\d{5,12}$/.test(account.uin) ||
@@ -247,8 +247,8 @@ export function createLinuxSession({
   function attachServices() {
     msgService = session.getMsgService(); groupService = session.getGroupService();
     buddyService = session.getBuddyService?.();
-    if (buddyService && typeof onFriendList === 'function') {
-      buddyListener = notificationAdapter({ onBuddyListChange: rows => { if (!stopped) observer(onFriendList, rows); } });
+    if (buddyService && (typeof onFriendList === 'function'||typeof onFriendRequests==='function')) {
+      buddyListener = notificationAdapter({ onBuddyListChange: rows => { if (!stopped) observer(onFriendList, rows); },onBuddyReqChange: rows=>{if(!stopped)observer(onFriendRequests,rows);} });
       buddyService.addKernelBuddyListener(buddyListener);
     }
     msgListener = notificationAdapter({ onRecvMsg: raw => {
@@ -341,8 +341,9 @@ export function createLinuxSession({
     },
     getServices() {
       if (!state.session_ready || stopped) throw fail('QQ native account session is not initialized.');
-      return { session, startup, msgService, groupService, buddyService };
+      return { session, startup, msgService, groupService, buddyService, addBuddyService:session.getAddBuddyService?.() };
     },
+    getGroups(){return [...groupCache.values()].map(row=>({...row}));},
     status,
     setDispatcher(hook) {
       if (hook !== undefined && hook !== null && typeof hook !== 'function') throw new Error('Invalid dispatcher forwarder.');
