@@ -35,6 +35,7 @@ export function createLoginFlow({ quickLogin, onChange = () => {} }) {
       // The verified native remembered-login response uses result: '0'.
       // Recognize canonical int32 decimal strings without coercing unknown data.
       const code = resultCode(result?.result);
+      if (state.authenticated_evidence === 'native_qr_login' && (code === null || code === 0)) { state = { ...state, login_result_code: code }; publish(); return; }
       if (state.authenticated_evidence === 'native_online_message') {
         state = { ...state, login_result_code: code }; publish(); return;
       }
@@ -50,7 +51,7 @@ export function createLoginFlow({ quickLogin, onChange = () => {} }) {
       if (stopped || current !== generation) return;
       pending = null;
       if (state.authenticated_evidence === 'native_online_message') return;
-      state = { ...state, stage: 'account_login_failed', authenticated: false, scan_confirmed: false, account_selected: false, self_id: 0, nickname: '' };
+      state = { ...state, stage: 'account_login_failed', authenticated: false, authenticated_evidence: null, scan_confirmed: false, account_selected: false, self_id: 0, nickname: '' };
       publish();
     });
     pending = { uin: ownUin, promise };
@@ -78,6 +79,13 @@ export function createLoginFlow({ quickLogin, onChange = () => {} }) {
       state = { ...state, scan_confirmed: false, account_selected: true, self_id: Number(info.uin), nickname: typeof info.nickName === 'string' ? info.nickName.slice(0, 256) : sameAccount ? state.nickname : '' };
       return begin(info.uin);
     },
+    onNativeAccountRestored(info) {
+      if (stopped || !info || !validUin(info.uin) || typeof info.uid !== 'string' || !info.uid) return;
+      const sameAccount = state.self_id === Number(info.uin);
+      if (!sameAccount) { generation++; pending = null; state = { ...state, authenticated: false, authenticated_evidence: null }; }
+      state = { ...state, scan_confirmed: false, account_selected: true, self_id: Number(info.uin), nickname: typeof info.nickName === 'string' ? info.nickName.slice(0,256) : sameAccount ? state.nickname : '' };
+      return begin(info.uin);
+    },
     onUserLoggedIn(ownUin) {
       if (stopped || !validUin(ownUin)) return;
       if (state.self_id && state.self_id !== Number(ownUin)) {
@@ -94,8 +102,9 @@ export function createLoginFlow({ quickLogin, onChange = () => {} }) {
       publish();
     },
     onSessionOnlineEvidence(evidence) {
-      if (stopped || !state.self_id || !state.account_selected || evidence?.session_ready !== true || evidence?.online !== true || evidence?.online_message_observed !== true || evidence?.msf_status !== 1 || evidence?.msf_error !== 0) return;
-      state = { ...state, authenticated: true, authenticated_evidence: 'native_online_message', stage: 'online' };
+      const confirmedQr = state.scan_confirmed === true && evidence?.authentication_evidence === 'native_qr_login' && (state.login_result_code === null || state.login_result_code === 0);
+      if (stopped || !state.self_id || !state.account_selected || evidence?.session_ready !== true || evidence?.online !== true || (!confirmedQr && evidence?.online_message_observed !== true) || evidence?.msf_status !== 1 || evidence?.msf_error !== 0) return;
+      state = { ...state, authenticated: true, authenticated_evidence: confirmedQr ? 'native_qr_login' : 'native_online_message', stage: 'online' };
       publish();
     },
     onDisconnected() {

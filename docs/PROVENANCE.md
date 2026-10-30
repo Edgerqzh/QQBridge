@@ -49,3 +49,7 @@ QQ 客户端具有自身许可，不属于本项目 MIT 授权范围，不进入
 本轮使用官方客户端空服务对象进行离线 N-API 参数转换观察，未启动登录或发送；观察图片、文件、语音元素字段与 recallMsg(peer, string[]) 入口。再在持有人已登录的真实会话验证 getUidByUins(string[]) 返回 {errCode:0,uids:Map}。真实接收记录验证媒体元素类型、提及中 atUid 为数字 QQ 号、atNtUid 为原生 UID。发布代码独立构造适配逻辑，不分发客户端代码或真实实验记录。
 
 图片准备新增 `sharp` 0.35.5（Apache-2.0），用于受限像素解码和198/720尺寸缩略图；其预构建原生依赖适用各自随包许可。安装脚本禁用，预构建组件通过 npm 可选依赖安装。使用说明依据 [sharp 官方文档](https://sharp.pixelplumbing.com/api-resize/)。原图与缩略图存储路径由真实原生 getRichMediaFilePathForMobileQQSend 接口产生，公开代码只允许写入当前专用 profile；PNG 发送已由用户确认可打开，随后撤回的原生 ACK 为 0。
+
+## 0.3 下载与音频
+
+新增 `silk-wasm` 3.7.1，包声明为 MIT，已阅读包内许可和接口定义，原始编解码依赖各自适用其许可。通用音频通过独立 FFmpeg 可执行文件处理；原生镜像通过 Debian 仓库安装，保留随包许可。用法依据 [silk-wasm 上游](https://github.com/idranme/silk-wasm)与 [FFmpeg 官方文档](https://ffmpeg.org/ffmpeg.html)。原生媒体下载的无返回派发、参数以及取消接口，通过官方指定构建的独立观察与真实账号测试确认；返回内容以大小和 MD5 校验。

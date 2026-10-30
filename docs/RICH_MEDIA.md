@@ -8,14 +8,14 @@
 | --- | --- |
 | 图片发送 | `image` 消息段，PNG/JPEG，完整解码、MD5、198/720 缩略图，并通过 SDK 路径接口归档原图及缩略图 |
 | 文件发送 | `file` 消息段；扩展动作 `upload_group_file` 接受 `group_id,file,name`，返回本进程 `message_id` |
-| 语音发送 | `record` 消息段，SILK/AMR 输入，要求 `duration` 秒数；不提供 MP3/WAV 转码 |
+| 语音发送 | `record` 消息段；0.3 自动转码及计算时长，见下载与转码说明 |
 | 提及 | `at.qq` 为数字 QQ 号或 `all`；查询真实原生 UID，分别写入 UIN/UID 字段；权限由 QQ 执行 |
 | 媒体接收 | 图片、文件、语音转换为相应段，ID 为不透明原生标识；不输出本地路径 |
 | 媒体取回 | 扩展动作 `get_file`，参数 `file_id` 取事件中的 `data.file`；返回 `base64,size,name` |
 | 撤回 | `delete_msg` 使用当前进程的消息别名；QQ 决定权限与时间限制，原生拒绝明确返回错误 |
 | 引用接收 | 能在当前别名窗口内解析原消息时附 `reply` 段；窗口外保留正文与提及，不虚构引用 ID |
 
-`get_file` 只读取当前账号实际收到、仍在白名单群内、位于独立 profile 的已缓存媒体。QQ 尚未缓存内容时返回不可用；主动下载、失效文件恢复、流式下载及语音转码尚未实现。文件段、`upload_group_file`、`get_file` 为扩展接口，不宣称属于完整 OneBot 11 标准。
+`get_file` 只读取当前账号实际收到、仍在白名单群内、位于独立 profile 的已缓存媒体。QQ 尚未缓存内容时会尝试按真实消息元数据下载；0.3 已增加已知媒体的主动下载和语音转码，详见 [下载与转码](DOWNLOAD_AUDIO.md)。服务器失效文件恢复及流式下载尚未实现。文件段、`upload_group_file`、`get_file` 为扩展接口，不宣称属于完整 OneBot 11 标准。
 
 媒体通过 `base64://` 输入，单文件最多 16 MiB；请求 JSON / WebSocket / IPC 上限为 24 MiB。已入库媒体可以用 `qqbridge://<sha256>` 再引用。远程 URL、`file://` 和任意本地路径均拒绝。托管媒体保存在私有 profile 的 `media/`，目前不自动清理；原生客户端自己的缓存由客户端维护。
 

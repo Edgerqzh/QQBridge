@@ -2,7 +2,7 @@
 
 公开源码：[Edgerqzh/QQBridge](https://github.com/Edgerqzh/QQBridge)。原创代码使用 MIT 许可。
 
-文本版已验证真实扫码、群消息收发和 OneBot WebSocket 推送。新增图片、文件、语音、提及与撤回处于显式启用的实验阶段，进展与使用方式见 [富媒体说明](docs/RICH_MEDIA.md)。
+文本版已验证真实扫码、群消息收发和 OneBot WebSocket 推送。新增图片、文件、语音、提及与撤回处于显式启用的实验阶段。0.3 增加 [主动下载与语音转码](docs/DOWNLOAD_AUDIO.md)、[本地扫码登录网页](docs/LOGIN_WEB.md)，详细覆盖见验证记录。
 
 普通 QQ 账号接入的独立开发 MVP：使用指定 Linux QQ 客户端的原生能力，对外提供部分 OneBot 11 HTTP / WebSocket 接口，供 AI 应用接入。
 

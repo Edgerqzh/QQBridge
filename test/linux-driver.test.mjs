@@ -23,7 +23,10 @@ async function fixture(t, options = {}) {
     initConfig() { calls.push(['login-config']); },
     addKernelLoginListener(value) { listener = value; calls.push(['login-listener']); },
     removeKernelLoginListener(value) { assert.equal(value, listener); calls.push(['remove-login']); },
-    abortPolling() { calls.push(['abort-polling']); },
+    setRemerberPwd(value) { calls.push(['remember',value]); },
+    setAutoLogin(value) { calls.push(['auto-login',value]); },
+    startPolling() { calls.push(['start-polling']); listener.onQRCodeLoginPollingStarted(); },
+    abortPolling() { calls.push(['abort-polling']); if(options.qrCancelEvent)listener.onQRCodeSessionFailed(7,4); },
     connect() { calls.push(['connect']); if (options.autoConnect !== false) listener.onLoginConnected(); return true; },
     quickLoginWithUin(uin) {
       calls.push(['quick-login', uin]);
@@ -37,6 +40,7 @@ async function fixture(t, options = {}) {
     },
     getQRCodePicture() {
       calls.push(['qr']);
+      listener.onQRCodeLoginPollingStarted(120,2);
       if (options.autoQr !== false) listener.onQRCodeGetPicture({ pngBase64QrcodeData: png, expireTime: 120, pollTimeInterval: 2 });
       return options.qrResult ?? true;
     },
@@ -490,4 +494,42 @@ test('experimental mutation policy rejects unavailable groups, expired IDs and d
   await assert.rejects(f.driver.call('send_group_msg', { group_id: 10001, message: [{ type: 'at', data: { qq: 'all' } }] }), error => error.retcode === 1404);
   await assert.rejects(f.driver.call('delete_msg', { message_id: 1 }), error => error.retcode === 1404);
   assert.equal(f.calls.some(call => ['send', 'recall'].includes(call[0])), false);
+});
+
+test('fresh QR refresh cancels an existing session and ignores only its expected cancellation',async t=>{
+  const f=await fixture(t,{qrCancelEvent:true});
+  await f.driver.call('get_login_qrcode');
+  assert.equal(f.calls.filter(c=>c[0]==='abort-polling').length,0);
+  await f.driver.call('get_login_qrcode',{refresh:true});
+  assert.equal(f.calls.filter(c=>c[0]==='abort-polling').length,1);
+  assert.equal((await f.driver.call('get_login_state')).qr_failure,null);
+  f.listener().onQRCodeSessionFailed(8,9,'private native diagnostics');
+  const failed=await f.driver.call('get_login_state');
+  assert.equal(failed.stage,'qr_session_expired');assert.deepEqual(failed.qr_failure,{reason:8,code:9});
+  assert.equal(JSON.stringify(failed).includes('private native diagnostics'),false);
+  await f.driver.call('get_login_qrcode');assert.equal(f.calls.filter(c=>c[0]==='qr').length,3);
+});
+test('QR login saves native remember preferences only when explicitly selected',async t=>{
+  const f=await fixture(t);await f.driver.call('get_login_qrcode',{remember_login:true});
+  assert.deepEqual(f.calls.filter(c=>['remember','auto-login'].includes(c[0])),[['remember',true],['auto-login',true]]);
+  await f.driver.call('get_login_qrcode',{refresh:true,remember_login:false});
+  assert.deepEqual(f.calls.filter(c=>['remember','auto-login'].includes(c[0])).slice(-2),[['remember',false],['auto-login',false]]);
+  await assert.rejects(f.driver.call('get_login_qrcode',{refresh:true,remember_login:'yes'}),e=>e.retcode===1400);
+});
+test('fresh QR authentication binds generated QR, confirmed account and matching logged-in callback',async t=>{
+  const f=await fixture(t,{autoUser:false});await f.driver.call('get_login_qrcode');await f.select();
+  // No account session is initialized until the matching native callback.
+  assert.equal(f.sessions.length,0);f.listener().onUserLoggedIn(account.uin);await nextTurn();await nextTurn();
+  assert.equal(f.sessions[0].authenticationEvidence(),true);await f.driver.stop();assert.equal(f.sessions[0].authenticationEvidence(),false);
+});
+test('native auto-restore can precede cache enumeration without inventing a QR scan',async t=>{
+  let resolveList;const f=await fixture(t,{loginUin:account.uin,quickResult:{result:'0'},loginList:()=>new Promise(resolve=>resolveList=resolve)});
+  f.listener().onQRCodeLoginSucceed(account);await nextTurn();await nextTurn();
+  const state=await f.driver.call('get_login_state');assert.equal(state.scan_confirmed,false);assert.equal(state.remembered_login.selected_via_cache,true);assert.equal(state.authenticated,true);
+  assert.equal(f.calls.filter(c=>c[0]==='qr').length,0);resolveList({result:0,LocalLoginInfoList:[]});await nextTurn();
+});
+test('unsolicited native auto-restore cannot select another account',async t=>{
+  const f=await fixture(t,{loginUin:account.uin,loginList:{result:0,LocalLoginInfoList:[]}});
+  f.listener().onQRCodeLoginSucceed({...account,uin:'987654321'});await nextTurn();
+  assert.equal(f.sessions.length,0);assert.equal(f.driver.status().online,false);assert.equal(f.driver.status().stage,'callback_error');
 });

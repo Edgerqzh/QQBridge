@@ -15,7 +15,7 @@ WORKDIR /app
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-       gcc libc6-dev libgnutls30 libx11-6 libx11-xcb1 libxext6 libuuid1 \
+       ffmpeg gcc libc6-dev libgnutls30 libx11-6 libx11-xcb1 libxext6 libuuid1 \
        libgssapi-krb5-2 libgcrypt20 ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 

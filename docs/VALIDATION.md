@@ -55,3 +55,7 @@
 ## 富媒体迭代
 
 本轮新增能力与测试结果单独记录于 [RICH_MEDIA](RICH_MEDIA.md)。以上 116 项计数为首个文本版本的历史记录。
+
+## 0.3 下载与转码
+
+最新的真实下载、语音转换、账号与索引重启恢复，以及 154 项 Linux / 153 项 Windows 通过、1 项 Windows 跳过的结果见 [DOWNLOAD_AUDIO](DOWNLOAD_AUDIO.md)。本轮没有向QQ群发送额外消息。

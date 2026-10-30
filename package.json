@@ -1,6 +1,6 @@
 {
   "name": "qqbridge",
-  "version": "0.2.0-dev.1",
+  "version": "0.3.0-dev.1",
   "description": "Independent QQ client bridge research prototype with a OneBot 11 gateway",
   "type": "module",
   "private": true,
@@ -15,10 +15,13 @@
     "runtime": "node --env-file-if-exists=.env src/runtime-cli.mjs",
     "qrcode": "node --env-file-if-exists=.env scripts/get-qrcode.mjs",
     "prepare:qq": "node scripts/prepare-linux-qq.mjs",
-    "test": "node --test test/*.test.mjs"
+    "test": "node --test test/*.test.mjs",
+    "login:web": "node --env-file-if-exists=.env src/login-web.mjs",
+    "test:stability": "node --test test/stability.test.mjs"
   },
   "dependencies": {
     "sharp": "0.35.5",
+    "silk-wasm": "3.7.1",
     "ws": "^8.18.3"
   }
 }

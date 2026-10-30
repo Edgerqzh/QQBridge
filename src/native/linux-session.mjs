@@ -62,7 +62,7 @@ const shape = value => {
 export function createLinuxSession({
   native, engine, account, profile, metadata, machineId,
   onState = () => {}, onMessage, onGroupList, onUnsupportedDependency = () => {},
-  forwardDispatcher, initTimeoutMs = 20000, getAuthenticationEvidence = () => false,
+  forwardDispatcher, initTimeoutMs = 20000, getAuthenticationEvidence = () => false, getAuthenticationEvidenceType = () => 'native_login_result',
 }) {
   if (typeof account?.uin !== 'string' || !/^\d{5,12}$/.test(account.uin) ||
       typeof account.uid !== 'string' || !account.uid || account.uid.length > 128) {
@@ -107,7 +107,8 @@ export function createLinuxSession({
   }
   const status = () => {
     const nativeLoginAuthenticated = nativeAuthenticationEvidence();
-    const authenticationEvidence = nativeLoginAuthenticated ? 'native_login_result' : state.online_message_observed ? 'native_online_message' : null;
+    let nativeEvidenceType=null;try{const value=getAuthenticationEvidenceType();if(['native_login_result','native_qr_login'].includes(value))nativeEvidenceType=value;}catch{}
+    const authenticationEvidence = nativeLoginAuthenticated ? nativeEvidenceType : state.online_message_observed ? 'native_online_message' : null;
     const dispatchReady = Boolean(session) && typeof forwarder === 'function' && !state.dispatch_error && !stopped;
     const online = state.session_ready && state.startup_result === 0 && state.init_result === 0 && authenticationEvidence !== null && state.msf_status === 1 && state.msf_error === 0 && dispatchReady && unsupported.size === 0 && !stopped;
     return { ...state, online, good: online && !state.observer_error, dispatch_ready: dispatchReady,

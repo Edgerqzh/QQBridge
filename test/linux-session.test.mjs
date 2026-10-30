@@ -78,6 +78,12 @@ test('uses the native module-to-session map and initializes before the one-time 
   assert.equal(f.state.config.selfUid, f.account.uid);
   assert.equal(f.state.config.a2, '');
 });
+test('QR login evidence still requires initialized identity, MSF and a recognized evidence type',async t=>{
+  let type='native_qr_login';const f=await fixture(t,{options:{getAuthenticationEvidence:()=>true,getAuthenticationEvidenceType:()=>type}});
+  await f.core.start();assert.equal(f.core.status().online,false);f.state.depends.onMSFStatusChange(1,0);
+  assert.equal(f.core.status().online,true);assert.equal(f.core.status().authentication_evidence,'native_qr_login');
+  type='unknown';assert.equal(f.core.status().online,false);
+});
 
 test('native result zero is insufficient when the returned account identity differs', async t => {
   const f = await fixture(t, { returnedUid: 'u_different_account', options: { getAuthenticationEvidence: () => true } });

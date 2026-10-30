@@ -176,3 +176,10 @@ test('a new QR account needs its own native result before inheriting authenticat
   assert.equal(flow.snapshot().authenticated, true);
   assert.equal(flow.snapshot().self_id, 9876543210);
 });
+test('confirmed QR session evidence preserves a pending legacy login without inventing its result',async()=>{
+  let complete;const flow=createLoginFlow({quickLogin:()=>new Promise(resolve=>complete=resolve)});
+  const pending=flow.onQRCodeLoginSucceed({uin:'1234567890'});await Promise.resolve();flow.onUserLoggedIn('1234567890');
+  flow.onSessionOnlineEvidence({session_ready:true,online:true,online_message_observed:false,authentication_evidence:'native_qr_login',msf_status:1,msf_error:0});
+  assert.equal(flow.snapshot().authenticated,true);assert.equal(flow.snapshot().authenticated_evidence,'native_qr_login');assert.equal(flow.snapshot().login_result_code,null);
+  complete({result:7});await pending;assert.equal(flow.snapshot().authenticated,false);
+});

@@ -41,7 +41,7 @@ export function imageInfo(bytes) {
   }
   throw fail('Only PNG and JPEG images with readable dimensions are supported.');
 }
-export function createMediaStore({ directory, maxBytes = 16 * 1024 * 1024 }) {
+export function createMediaStore({ directory, maxBytes = 16 * 1024 * 1024, convertAudio }) {
   const root = path.resolve(directory);
   return {
     async prepare(file, kind, name) {
@@ -62,6 +62,10 @@ export function createMediaStore({ directory, maxBytes = 16 * 1024 * 1024 }) {
         bytes = await readFile(resolved);
       } else throw fail('Remote URLs and arbitrary local paths are not accepted; use base64:// media.');
       if (!bytes.length || bytes.length > maxBytes) throw fail('Media must contain 1 to 16777216 bytes.');
+      let convertedDuration;
+      if (kind === 'record' && convertAudio) {
+        const converted = await convertAudio(bytes); bytes = converted.bytes; convertedDuration = Math.ceil(converted.duration_ms/1000);
+      }
       const sha256 = createHash('sha256').update(bytes).digest('hex');
       const md5 = createHash('md5').update(bytes).digest('hex');
       const info = kind === 'image' ? imageInfo(bytes) : {};
@@ -95,7 +99,7 @@ export function createMediaStore({ directory, maxBytes = 16 * 1024 * 1024 }) {
         }
       }
       return { fileName, sourcePath, size: String(bytes.length), md5, sha256,
-        thumbPaths, thumbSize,
+        thumbPaths, thumbSize, duration: convertedDuration,
         sha1: createHash('sha1').update(bytes).digest('hex'),
         md5Ten: createHash('md5').update(bytes.subarray(0, 10*1024*1024)).digest('hex'), ...info };
     },

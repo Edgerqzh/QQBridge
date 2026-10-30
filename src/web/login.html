@@ -1,0 +1,9 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>QQBridge · 账号登录</title><link rel="stylesheet" href="/login.css"></head><body>
+<header><a class="brand" href="/login"><span class="mark">Q</span> QQBridge</a><span class="local">● 本机连接</span></header>
+<main><section class="intro"><div class="eyebrow">连接你的 QQ 账号</div><h1>扫一下，<br>让连接开始。</h1><p class="lead">用手机 QQ 扫码并确认登录。<br>二维码与登录状态会在这里实时更新。</p>
+<ol><li><span>01</span><div><b>打开手机 QQ</b><p>使用你希望接入的测试账号</p></div></li><li><span>02</span><div><b>扫描右侧二维码</b><p>保持此页打开，失效后可直接刷新</p></div></li><li><span>03</span><div><b>在手机确认登录</b><p>连接成功后，这里会自动显示结果</p></div></li></ol>
+<p class="privacy">登录页仅在这台电脑开放。扫码过程不会自动向群发送消息。</p></section>
+<section class="card" aria-label="扫码登录"><div class="card-top"><span class="pill" id="pill">正在连接</span><span id="clock">—</span></div><h2 id="title">正在准备登录</h2><p id="subtitle">请稍候，正在连接本机 QQ 服务。</p>
+<div class="qr-wrap"><img id="qr" alt="QQ 登录二维码" hidden><div id="placeholder" class="placeholder"><span class="spinner"></span><span id="placeholder-text">正在连接服务…</span></div><div id="success" hidden><div class="check">✓</div><b>已连接</b></div></div>
+<label class="remember"><input id="remember" type="checkbox" checked> 记住这台电脑的登录</label><button id="refresh" disabled>获取新二维码 <span>↻</span></button><p class="hint" id="hint" role="status" aria-live="polite">状态自动更新，无需反复刷新页面。</p><div class="account" id="account" hidden></div></section></main>
+<footer>QQBridge <span>账号登录 · 本机控制台</span></footer><script src="/login.js"></script></body></html>

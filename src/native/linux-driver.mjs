@@ -3,6 +3,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { createDriverCore, parseAllowedGroups } from './driver-core.mjs';
+import {readSelectedLogin,saveSelectedLogin} from './selected-login.mjs';
 
 /** Production loader for the single verified official Linux QQ native build. */
 export async function createDriver({ emitEvent, emitStatus }) {
@@ -15,7 +16,7 @@ export async function createDriver({ emitEvent, emitStatus }) {
     throw new Error('Experimental native support requires the tested Linux QQ 3.2.34-53644 x64 build.');
   }
   const allowedGroups = parseAllowedGroups(process.env.QQBRIDGE_ALLOWED_GROUPS);
-  const loginUin = process.env.QQBRIDGE_LOGIN_UIN || '';
+  const loginUin = process.env.QQBRIDGE_LOGIN_UIN || (process.env.QQBRIDGE_FORCE_QR === '1' ? '' : await readSelectedLogin(profile));
   const require = createRequire(import.meta.url);
   let native;
   try { native = require(path.join(appDir, 'wrapper.node')); }
@@ -26,6 +27,7 @@ export async function createDriver({ emitEvent, emitStatus }) {
   return createDriverCore({
     native, metadata, profile, emitEvent, emitStatus, allowedGroups, loginUin,
     experimentalRichMedia: process.env.QQBRIDGE_EXPERIMENTAL_RICH_MEDIA === '1',
+    persistSelectedAccount: uin => saveSelectedLogin(profile,uin),
     async prepareProfile() {
       await mkdir(profile, { recursive: true, mode: 0o700 });
       let machineId;

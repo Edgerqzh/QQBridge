@@ -36,10 +36,11 @@ export async function buildGroupSegments({ groupId, message, autoEscape, mediaSt
         fileMd5: m.md5, file10MMd5: m.md5Ten, fileSha: m.sha1, fileSha3: '',
       } });
       if (segment.type === 'record') {
-        if (!Number.isInteger(data.duration) || data.duration < 1 || data.duration > 600) throw fail('Voice duration must be an integer from 1 to 600 seconds.');
+        const duration = m.duration ?? data.duration;
+        if (!Number.isInteger(duration) || duration < 1 || duration > 600) throw fail('Voice duration must be an integer from 1 to 600 seconds.');
         elements.push({ elementType: 4, elementId: '0', pttElement: {
           fileName: m.fileName, filePath: m.sourcePath, fileSize: m.size, md5HexStr: m.md5,
-          duration: data.duration, formatType: m.format, voiceType: 0,
+          duration, formatType: m.format, voiceType: 0,
           waveAmplitudes: [], otherBusinessInfo: new Map(),
         } });
       }
