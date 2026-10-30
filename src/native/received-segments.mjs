@@ -1,0 +1,36 @@
+const escape = text => text.replaceAll('&', '&amp;').replaceAll('[', '&#91;').replaceAll(']', '&#93;').replaceAll(',', '&#44;');
+const safe = value => typeof value === 'string' && value.length > 0 && value.length <= 512 && !/[\\/\u0000-\u001f\u007f]/.test(value) ? value : null;
+export function receivedSegments(elements, resolveReply = () => null) {
+  if (!Array.isArray(elements) || !elements.length || elements.length > 64) return null;
+  const message = [];
+  for (const element of elements) {
+    if (element?.elementType === 1 && typeof element.textElement?.content === 'string') {
+      const text = element.textElement;
+      if (text.atType === 1) message.push({ type: 'at', data: { qq: 'all' } });
+      else if (text.atType === 2 && /^[1-9]\d{4,11}$/.test(text.atUid)) message.push({ type: 'at', data: { qq: text.atUid } });
+      else message.push({ type: 'text', data: { text: text.content } });
+    } else if (element?.elementType === 2 && element.picElement) {
+      const picture = element.picElement, id = safe(picture.fileUuid) ?? safe(picture.md5HexStr);
+      if (!id) return null;
+      message.push({ type: 'image', data: { file: id } });
+    } else if (element?.elementType === 3 && element.fileElement) {
+      const file = element.fileElement, id = safe(file.fileUuid) ?? safe(file.fileMd5);
+      if (!id || !safe(file.fileName) || !/^\d{1,16}$/.test(String(file.fileSize))) return null;
+      message.push({ type: 'file', data: { file: id, name: file.fileName, size: String(file.fileSize) } });
+    } else if (element?.elementType === 4 && element.pttElement) {
+      const voice = element.pttElement, id = safe(voice.fileUuid) ?? safe(voice.md5HexStr);
+      if (!id) return null;
+      message.push({ type: 'record', data: { file: id } });
+    } else if (element?.elementType === 7 && element.replyElement) {
+      const id = resolveReply(element.replyElement.replayMsgId);
+      if (Number.isInteger(id) && id > 0) message.push({ type: 'reply', data: { id: String(id) } });
+      // An unknown process-local reference cannot be invented. Keep the rest
+      // of the real message, including mentions, without claiming a reply ID.
+    } else return null;
+  }
+  if (!message.length) return null;
+  const raw = message.map(segment => segment.type === 'text'
+    ? segment.data.text.replaceAll('&','&amp;').replaceAll('[','&#91;').replaceAll(']','&#93;')
+    : `[CQ:${segment.type},${Object.entries(segment.data).map(([key,value]) => `${key}=${escape(String(value))}`).join(',')}]`).join('');
+  return { message, raw };
+}

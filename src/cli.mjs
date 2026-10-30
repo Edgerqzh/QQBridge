@@ -18,7 +18,7 @@ async function main() {
   if (command !== 'start') throw new Error('Usage: node src/cli.mjs start|init|doctor');
   const config = readConfig();
   const backend = new BridgeBackend({ token: config.bridgeToken, host: config.bridgeHost, port: config.bridgePort });
-  const gateway = createGateway({ backend, token: config.token, host: config.host, port: config.port, appVersion: '0.1.0-dev.1' });
+  const gateway = createGateway({ backend, token: config.token, host: config.host, port: config.port, appVersion: '0.2.0-dev.1' });
   const reverse = config.reverseUrl ? createReverseWebSocket({ backend, url: config.reverseUrl, token: config.reverseToken }) : null;
   try {
     await backend.start(); await gateway.start(); await reverse?.start();

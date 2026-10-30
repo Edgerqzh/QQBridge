@@ -13,7 +13,7 @@ function identity(backend) {
 export function createReverseWebSocket({
   backend, url, token, reconnectMs = 1000, heartbeatMs = 15000,
   requestTimeoutMs = 15000, maxBufferedBytes = 4 * 1024 * 1024,
-  maxPayloadBytes = 1024 * 1024, maxConcurrentCalls = 32,
+  maxPayloadBytes = 24 * 1024 * 1024, maxConcurrentCalls = 32,
 } = {}) {
   if (typeof url !== 'string' || !url.trim()) throw new TypeError('an explicit reverse WebSocket URL is required');
   const endpoint = new URL(url);

@@ -13,6 +13,18 @@ async function setup(t, options = {}) {
   return { backend, url: `ws://127.0.0.1:${backend.address().port}/bridge` };
 }
 
+test('media-sized payloads cross IPC in both directions without the old one MiB cutoff', async t => {
+  const { backend, url } = await setup(t);
+  const runtime = await connectRuntime({ url, token, createDriver: async () => ({
+    actions: ['fixture_media'], start: async () => {}, stop: async () => {},
+    status: () => ({ online: true, good: true, self_id: 12345 }),
+    call: async (_action, params) => ({ base64: params.base64 }),
+  }) });
+  t.after(() => runtime.stop());
+  const base64 = Buffer.alloc(1024 * 1024, 42).toString('base64');
+  assert.equal((await backend.call('fixture_media', { base64 })).base64, base64);
+});
+
 test('disconnected bridge refuses actions instead of inventing QQ results', async t => {
   const { backend } = await setup(t);
   assert.deepEqual(backend.status(), { online: false, good: false, self_id: 0, nickname: '', bridge_connected: false, capabilities: [] });

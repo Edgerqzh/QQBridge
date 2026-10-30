@@ -78,7 +78,7 @@ function readJson(request, maxBodyBytes, timeoutMs) {
 /** HTTP actions and a forward WebSocket endpoint. The caller owns the backend. */
 export function createGateway({
   backend, token, host = '127.0.0.1', port = 0, heartbeatMs = 15000,
-  maxBodyBytes = 1048576, requestTimeoutMs = 15000,
+  maxBodyBytes = 24 * 1024 * 1024, requestTimeoutMs = 15000,
   appName = 'QQBridge', appVersion = '0.1.0',
 } = {}) {
   if (typeof token !== 'string' || token.length === 0 || /[\r\n]/.test(token)) throw new TypeError('a nonempty bearer token is required');

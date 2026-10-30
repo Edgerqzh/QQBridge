@@ -1,5 +1,9 @@
 # QQBridge
 
+公开源码：[Edgerqzh/QQBridge](https://github.com/Edgerqzh/QQBridge)。原创代码使用 MIT 许可。
+
+文本版已验证真实扫码、群消息收发和 OneBot WebSocket 推送。新增图片、文件、语音、提及与撤回处于显式启用的实验阶段，进展与使用方式见 [富媒体说明](docs/RICH_MEDIA.md)。
+
 普通 QQ 账号接入的独立开发 MVP：使用指定 Linux QQ 客户端的原生能力，对外提供部分 OneBot 11 HTTP / WebSocket 接口，供 AI 应用接入。
 
 **已在官方 Linux QQ `3.2.34-53644` x64 上验证真实链路：二维码 → 用户扫码 → 账号会话初始化 → 获取群列表 → 实时群文本接收 → 单次群文本发送，用户确认在群内收到。** 当前仍是针对单一构建的开发原型，尚未完整兼容 OneBot 11。最终源码重启、完整容器首次启动及接口回归的覆盖分别见 [功能清单](docs/FEATURES.md)。
@@ -144,6 +148,7 @@ curl -H "Authorization: Bearer $QQBRIDGE_TOKEN" \
 | `QQBRIDGE_QQ_APP` | QQ 的 `resources/app` | 手动默认本地 `data/qq`；完整容器使用镜像路径 |
 | `QQBRIDGE_QQ_PROFILE` | 原生账号资料目录 | 手动默认 `data/qq-profile`；完整容器使用 named volume |
 | `QQBRIDGE_LOGIN_UIN` | 同一 profile 内明确选择的缓存账号 | 默认空，使用扫码；需原生允许快速登录 |
+| `QQBRIDGE_EXPERIMENTAL_RICH_MEDIA` | 实验富媒体、提及、撤回与缓存取回 | 默认 `0`，设置 `1` 启用；详见富媒体说明 |
 | `QQBRIDGE_ALLOWED_GROUPS` | 逗号分隔的正整数群白名单 | 默认空，允许账号已加入的群 |
 | `QQBRIDGE_REVERSE_WS_URL` | AI 应用反向 WebSocket 地址 | 默认空；仅 `ws://` / `wss://`，不接受内嵌凭据或 fragment |
 | `QQBRIDGE_REVERSE_WS_TOKEN` | 反向连接令牌 | 启用时至少 32 字符，与前两令牌不同 |

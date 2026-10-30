@@ -30,7 +30,7 @@ export class BridgeBackend extends EventEmitter {
     Object.assign(this, { token, host, port, callTimeoutMs, handshakeTimeoutMs, heartbeatMs, maxPending });
     this.peer = null; this.pending = new Map(); this.actions = new Set(); this.state = normalizeStatus();
     this.server = createServer((_req, res) => { res.writeHead(404); res.end(); });
-    this.wss = new WebSocketServer({ noServer: true, maxPayload: 1024 * 1024, perMessageDeflate: false });
+    this.wss = new WebSocketServer({ noServer: true, maxPayload: 24 * 1024 * 1024, perMessageDeflate: false });
     this.server.on('upgrade', (req, socket, head) => {
       if (req.url !== '/bridge' || req.headers.origin || !authorized(req.headers.authorization, this.token)) {
         socket.end('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\nContent-Length: 0\r\n\r\n'); return;

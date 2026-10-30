@@ -43,10 +43,12 @@ async function fixture(t, options = {}) {
     logout() { assert.fail('Driver must never invoke native logout'); },
   };
   const msgService = {
+    recallMsg(...args) { calls.push(['recall', ...args]); return { result: 0 }; },
     generateMsgUniqueId(...args) { calls.push(['generate-id', ...args]); return nativeId; },
     sendMsg(...args) { calls.push(['send', ...args]); return options.sendResult ?? { result: 0 }; },
   };
   const groupService = {
+    getUidByUins(uins) { return { errCode: 0, uids: new Map(uins.map(uin => [uin, 'u_fixture_target'])) }; },
     getGroupList(force) {
       assert.equal(force, false); calls.push(['group-list']);
       if (options.autoGroups !== false) queueMicrotask(() => sessionOptions.onGroupList(options.groups ?? groups));
@@ -62,7 +64,7 @@ async function fixture(t, options = {}) {
     prepareProfile: async () => 'fixture-machine-id',
     emitStatus(value) { timeline.push(['status', value]); },
     emitEvent(value) { timeline.push(['event', value]); },
-    allowedGroups: options.allowedGroups, loginUin: options.loginUin ?? '',
+    experimentalRichMedia: options.experimentalRichMedia, allowedGroups: options.allowedGroups, loginUin: options.loginUin ?? '',
     connectionTimeoutMs: 80, qrTimeoutMs: 80, accountTimeoutMs: 80, sendTimeoutMs: options.sendTimeoutMs ?? 80,
     createSession(value) {
       calls.push(['create-session', value.account]); sessionOptions = value;
@@ -418,11 +420,13 @@ test('the real session component joins login, dispatcher, native listeners, acco
     quickLoginWithUin(uin) { queueMicrotask(() => refs.login.onUserLoggedIn(uin)); return new Promise(() => {}); },
   };
   const msgService = {
+    recallMsg(...args) { calls.push(['recall', ...args]); return { result: 0 }; },
     addKernelMsgListener(value) { refs.msg = value; }, removeKernelMsgListener() {},
     generateMsgUniqueId: () => nativeId,
     sendMsg(...args) { sends.push(args); return { result: 0 }; },
   };
   const groupService = {
+    getUidByUins(uins) { return { errCode: 0, uids: new Map(uins.map(uin => [uin, 'u_fixture_target'])) }; },
     addKernelGroupListener(value) { refs.group = value; }, removeKernelGroupListener() {},
     getGroupList(force) { assert.equal(force, false); refs.group.onGroupListUpdate(1, groups); return { result: 0 }; },
   };
@@ -467,4 +471,23 @@ test('the real session component joins login, dispatcher, native listeners, acco
   const result = await driver.call('send_group_msg', { group_id: 10001, message: 'Fixture only; fake native service' });
   assert.equal(sends.length, 1); assert.equal(sends[0][0], nativeId);
   assert.ok(result.message_id > events[0].message_id);
+});
+
+
+test('experimental mentions resolve real-format UIDs and recall preserves native string IDs', async t => {
+  const f = await fixture(t, { experimentalRichMedia: true });
+  await f.select(); await f.online(); await f.driver.call('get_group_list');
+  const receipt = await f.driver.call('send_group_msg', { group_id: 10001, message: [{ type: 'at', data: { qq: '987654321' } }, { type: 'text', data: { text: 'fixture' } }] });
+  const sent = f.calls.find(call => call[0] === 'send');
+  assert.equal(sent[3][0].textElement.atNtUid, 'u_fixture_target');
+  await f.driver.call('delete_msg', { message_id: receipt.message_id });
+  assert.deepEqual(f.calls.find(call => call[0] === 'recall').slice(1), [{ chatType: 2, peerUid: '10001', guildId: '' }, [nativeId]]);
+});
+
+test('experimental mutation policy rejects unavailable groups, expired IDs and disabled opt-in before native operations', async t => {
+  const f = await fixture(t);
+  await f.select(); await f.online(); await f.driver.call('get_group_list');
+  await assert.rejects(f.driver.call('send_group_msg', { group_id: 10001, message: [{ type: 'at', data: { qq: 'all' } }] }), error => error.retcode === 1404);
+  await assert.rejects(f.driver.call('delete_msg', { message_id: 1 }), error => error.retcode === 1404);
+  assert.equal(f.calls.some(call => ['send', 'recall'].includes(call[0])), false);
 });

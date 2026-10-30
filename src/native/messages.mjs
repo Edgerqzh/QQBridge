@@ -1,3 +1,4 @@
+import { receivedSegments } from './received-segments.mjs';
 const MAX_ALIAS = 0x7fffffff;
 const MAX_UNIX_SECONDS = 253402300799;
 
@@ -60,7 +61,7 @@ function cqText(text) { return text.replaceAll('&', '&amp;').replaceAll('[', '&#
  * IDs and deduplication state are process-local and FIFO-bounded by capacity.
  * rememberNative allocates an alias but does not mark an event as emitted.
  */
-export function createMessageMapper({ selfId, allowedGroups, capacity = 5000 } = {}) {
+export function createMessageMapper({ selfId, allowedGroups, capacity = 5000, richMedia = false } = {}) {
   if (!Number.isInteger(capacity) || capacity < 1 || capacity > MAX_ALIAS) throw new RangeError('capacity must be a positive int32 integer');
   if (typeof selfId !== 'function' && !numericIdentity(selfId)) throw new TypeError('selfId must be a positive safe integer identity or getter');
   let allow;
@@ -122,8 +123,9 @@ export function createMessageMapper({ selfId, allowedGroups, capacity = 5000 } =
       // seconds compatibility fallback when the native field is absent.
       const time = timestamp(record.msgTime === undefined ? record.time : record.msgTime);
       if (time === null) return null;
-      const text = textContent(record.elements);
-      if (text === null) return null;
+      const rich = richMedia ? receivedSegments(record.elements, nativeId => byNative.get(`2:${parsed.peer.text}:${nativeId}`)) : null;
+      const text = richMedia ? null : textContent(record.elements);
+      if (richMedia ? rich === null : text === null) return null;
       const alias = remember(parsed);
       const entry = byAlias.get(alias);
       if (entry.emitted) return null;
@@ -131,7 +133,7 @@ export function createMessageMapper({ selfId, allowedGroups, capacity = 5000 } =
       return {
         time, self_id: own.value, post_type: 'message', message_type: 'group', sub_type: 'normal',
         message_id: alias, group_id: parsed.peer.value, user_id: sender.value,
-        anonymous: null, message: [{ type: 'text', data: { text } }], raw_message: cqText(text), font: 0,
+        anonymous: null, message: rich?.message ?? [{ type: 'text', data: { text } }], raw_message: rich?.raw ?? cqText(text), font: 0,
         sender: { user_id: sender.value, nickname: nickname(record) },
       };
     },

@@ -49,6 +49,10 @@ export async function sendText({
   msgService, groupId, text, now = Date.now, timeoutMs = 15000, maxTextBytes = 4096,
 } = {}) {
   const message = buildGroupText({ groupId, text, maxTextBytes });
+  return sendElements({ msgService, message, now, timeoutMs });
+}
+
+export async function sendElements({ msgService, message, now = Date.now, timeoutMs = 12000 }) {
   if (typeof msgService?.generateMsgUniqueId !== 'function' || typeof msgService?.sendMsg !== 'function') {
     throw new NativeSendError('NATIVE_SEND_UNAVAILABLE', 'QQ native message service is unavailable.', { retcode: 1503 });
   }

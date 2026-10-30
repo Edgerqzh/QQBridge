@@ -25,6 +25,7 @@ export async function createDriver({ emitEvent, emitStatus }) {
   }
   return createDriverCore({
     native, metadata, profile, emitEvent, emitStatus, allowedGroups, loginUin,
+    experimentalRichMedia: process.env.QQBRIDGE_EXPERIMENTAL_RICH_MEDIA === '1',
     async prepareProfile() {
       await mkdir(profile, { recursive: true, mode: 0o700 });
       let machineId;

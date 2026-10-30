@@ -22,7 +22,7 @@ export async function connectRuntime({ url, token, createDriver, handshakeTimeou
   try {
     await driver.start();
     currentStatus = driver.status();
-    ws = new WebSocket(endpoint, { headers: { Authorization: `Bearer ${token}` }, maxPayload: 1024 * 1024, perMessageDeflate: false });
+    ws = new WebSocket(endpoint, { headers: { Authorization: `Bearer ${token}` }, maxPayload: 24 * 1024 * 1024, perMessageDeflate: false });
     ws.on('error', () => {});
     await new Promise((resolve, reject) => {
       timer = setTimeout(() => reject(new Error('Bridge handshake timed out')), handshakeTimeoutMs);
