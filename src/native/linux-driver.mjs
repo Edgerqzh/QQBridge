@@ -6,7 +6,7 @@ import { createDriverCore, parseAllowedGroups } from './driver-core.mjs';
 import {readSelectedLogin,saveSelectedLogin} from './selected-login.mjs';
 
 /** Production loader for the single verified official Linux QQ native build. */
-export async function createDriver({ emitEvent, emitStatus }) {
+export async function createDriver({ emitEvent, emitStatus, requestRestart }) {
   if (process.platform !== 'linux' || process.arch !== 'x64') throw new Error('The experimental native driver requires Linux x64.');
   const appDir = path.resolve(process.env.QQBRIDGE_QQ_APP || 'data/qq/extracted/opt/QQ/resources/app');
   const profile = path.resolve(process.env.QQBRIDGE_QQ_PROFILE || 'data/qq-profile');
@@ -25,7 +25,8 @@ export async function createDriver({ emitEvent, emitStatus }) {
     throw new Error('The QQ native module does not expose the required verified interfaces.');
   }
   return createDriverCore({
-    native, metadata, profile, emitEvent, emitStatus, allowedGroups, loginUin,
+    native, metadata, profile, emitEvent, emitStatus, allowedGroups, loginUin, requestRestart,
+    forceQr: process.env.QQBRIDGE_FORCE_QR === '1', manualRecoveryReason: process.env.QQBRIDGE_RECOVERY_MANUAL || '',
     experimentalRichMedia: process.env.QQBRIDGE_EXPERIMENTAL_RICH_MEDIA === '1',
     persistSelectedAccount: uin => saveSelectedLogin(profile,uin),
     async prepareProfile() {

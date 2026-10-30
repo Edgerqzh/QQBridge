@@ -61,7 +61,7 @@ const shape = value => {
  */
 export function createLinuxSession({
   native, engine, account, profile, metadata, machineId,
-  onState = () => {}, onMessage, onGroupList, onUnsupportedDependency = () => {},
+  onState = () => {}, onMessage, onMessageUpdate, onGroupList, onAuthenticationRequired, onUnsupportedDependency = () => {},
   forwardDispatcher, initTimeoutMs = 20000, getAuthenticationEvidence = () => false, getAuthenticationEvidenceType = () => 'native_login_result',
 }) {
   if (typeof account?.uin !== 'string' || !/^\d{5,12}$/.test(account.uin) ||
@@ -110,7 +110,7 @@ export function createLinuxSession({
     let nativeEvidenceType=null;try{const value=getAuthenticationEvidenceType();if(['native_login_result','native_qr_login'].includes(value))nativeEvidenceType=value;}catch{}
     const authenticationEvidence = nativeLoginAuthenticated ? nativeEvidenceType : state.online_message_observed ? 'native_online_message' : null;
     const dispatchReady = Boolean(session) && typeof forwarder === 'function' && !state.dispatch_error && !stopped;
-    const online = state.session_ready && state.startup_result === 0 && state.init_result === 0 && authenticationEvidence !== null && state.msf_status === 1 && state.msf_error === 0 && dispatchReady && unsupported.size === 0 && !stopped;
+    const online = state.session_ready && !state.authentication_revoked && state.startup_result === 0 && state.init_result === 0 && authenticationEvidence !== null && state.msf_status === 1 && state.msf_error === 0 && dispatchReady && unsupported.size === 0 && !stopped;
     return { ...state, online, good: online && !state.observer_error, dispatch_ready: dispatchReady,
       authentication_evidence: authenticationEvidence, native_login_authenticated: nativeLoginAuthenticated,
       dispatch_pending: queue.length, unsupported_dependencies: [...unsupported], stopped };
@@ -142,7 +142,11 @@ export function createLinuxSession({
     state.msf_error = Number.isInteger(errorCode) ? errorCode : null;
     notify();
   };
-  depends.onMSFSsoError = (...args) => unsupportedDependency('onMSFSsoError', args);
+  function authenticationRequired(reason) {
+    if (stopped || state.authentication_revoked) return;
+    state.authentication_revoked = true; notify(); observer(onAuthenticationRequired, reason);
+  }
+  depends.onMSFSsoError = () => authenticationRequired('sso_error');
 
   function blockDispatch() {
     state.dispatch_error = true; state.dispatch_rejected++; queue.length = 0; queueBytes = 0;
@@ -247,7 +251,9 @@ export function createLinuxSession({
       state.message_batches_received++;
       if (raw.some(message => message?.isOnlineMsg === true && message?.isImportMsg === false)) state.online_message_observed = true;
       notify(); observer(onMessage, raw);
-    } });
+    }, onMsgInfoListUpdate: raw => {
+      if (!stopped && Array.isArray(raw)) observer(onMessageUpdate, raw);
+    }, onKickedOffLine: () => authenticationRequired('kicked_offline') });
     msgService.addKernelMsgListener(msgListener); state.message_listener_attached = true;
     if (typeof onGroupList === 'function') {
       groupListener = notificationAdapter({ onGroupListUpdate: updateGroups });

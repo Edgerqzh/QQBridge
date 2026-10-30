@@ -123,6 +123,7 @@ export function createAccountActions({ getSession, getAccount, timeoutMs = 12000
       }
       return true;
     },
+    invalidate() { cachedGroups = null; context = null; rejectPending('Group membership must be refreshed.'); },
     close() {
       if (closed) return;
       closed = true; cachedGroups = null; context = null;

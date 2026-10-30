@@ -2,7 +2,7 @@
 
 公开源码：[Edgerqzh/QQBridge](https://github.com/Edgerqzh/QQBridge)。原创代码使用 MIT 许可。
 
-文本版已验证真实扫码、群消息收发和 OneBot WebSocket 推送。新增图片、文件、语音、提及与撤回处于显式启用的实验阶段。0.3 增加 [主动下载与语音转码](docs/DOWNLOAD_AUDIO.md)、[本地扫码登录网页](docs/LOGIN_WEB.md)，0.4 增加 [引用回复、消息查询、历史、群成员与 ID 持久化](docs/CONTEXT.md)。详细覆盖见各阶段验证记录。
+文本版已验证真实扫码、群消息收发和 OneBot WebSocket 推送。新增图片、文件、语音、提及与撤回处于显式启用的实验阶段。0.3 增加 [主动下载与语音转码](docs/DOWNLOAD_AUDIO.md)、[本地扫码登录网页](docs/LOGIN_WEB.md)，0.4 增加 [引用回复、消息查询、历史、群成员与 ID 持久化](docs/CONTEXT.md)。0.5 增加 [撤回通知、成员事件与掉线恢复](docs/EVENTS_RECOVERY.md)。详细覆盖见各阶段验证记录。
 
 普通 QQ 账号接入的独立开发 MVP：使用指定 Linux QQ 客户端的原生能力，对外提供部分 OneBot 11 HTTP / WebSocket 接口，供 AI 应用接入。
 
@@ -40,7 +40,7 @@ docker compose --env-file .env -f compose.native.yaml cp qqbridge:/app/data/logi
 
 PowerShell 中可用 `New-Item -ItemType Directory -Force data` 创建本机目录。打开 `data/login-qr.png`，由账号持有人使用手机 QQ 扫码确认。二维码和账号资料保存在容器 named volume 中；停止服务使用同一 Compose 文件的 `down`，默认保留数据。
 
-容器以 UID 1000 运行，只发布宿主 `127.0.0.1:5700`，原生 IPC `5711` 仅在容器回环使用。网关或 runtime 任一子进程退出时，supervisor 联停另一进程；SIGTERM 正常联停。健康检查允许“runtime 已连接、等待扫码”的状态，不能将健康直接视为 QQ 在线。
+容器以 UID 1000 运行，只发布宿主 `127.0.0.1:5700`，原生 IPC `5711` 仅在容器回环使用。网关异常退出时联停原生 runtime；原生进程退出时 supervisor 在预算内单独重启，超限转扫码或保持离线。SIGTERM 正常联停。健康检查允许“runtime 已连接、等待扫码”的状态，不能将健康直接视为 QQ 在线。
 
 完整容器的新卷启动、真实二维码和退出管理已验证；容器内扫码后的完整收发覆盖与此前原生宿主实验分别记录，见功能清单。
 
@@ -116,7 +116,7 @@ npm run qrcode
 
 原生 19 位消息 ID 保持字符串；对外别名为正 int32。映射和去重记忆按账号保存到私有 profile，默认 FIFO 容量 5000；同账号同资料目录重启后保留，淘汰后失效，旧 ID 不会重新分配。映射不保存正文或昵称。损坏索引拒绝初始化；持久化机制、升级边界和历史分页见 [消息上下文说明](docs/CONTEXT.md)。
 
-图片、文件、语音、提及、引用收发和撤回提供显式启用的实验接口，详见 [富媒体说明](docs/RICH_MEDIA.md)。私聊、多账号及通用自动会话恢复尚未实现；同一资料目录中明确选择缓存账号的快速登录已实现。默认文本模式不启用新增消息段。
+图片、文件、语音、提及、引用收发和撤回提供显式启用的实验接口，详见 [富媒体说明](docs/RICH_MEDIA.md)。私聊和多账号尚未实现；完整原生容器已提供有界的掉线 / 原生进程恢复，认证失效转为重新扫码，见 [恢复说明](docs/EVENTS_RECOVERY.md)。同一资料目录中明确选择缓存账号的快速登录已实现。默认文本模式不启用新增消息段。
 
 ## 网关连接
 

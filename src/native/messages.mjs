@@ -77,6 +77,7 @@ export function createMessageMapper({ selfId, allowedGroups, capacity = 5000, ri
   const byNative = new Map();
   const byAlias = new Map();
   const bySequence = new Map();
+  const notices = new Set();
   let nextAlias = 1;
 
   if (initialState !== undefined) {
@@ -91,6 +92,10 @@ export function createMessageMapper({ selfId, allowedGroups, capacity = 5000, ri
       if (parsed.value.msgSeq && parsed.value.msgSeq !== '0') bySequence.set(`${parsed.peer.text}:${parsed.value.msgSeq}`, saved.alias);
     }
     nextAlias = initialState.nextAlias;
+    if (initialState.notices !== undefined) {
+      if (!Array.isArray(initialState.notices) || initialState.notices.length > capacity || initialState.notices.some(key => typeof key !== 'string' || key.length > 256 || !key.length)) throw new Error('Invalid notice index.');
+      for (const key of initialState.notices) notices.add(key);
+    }
   }
 
   function metadata(record) {
@@ -182,7 +187,14 @@ export function createMessageMapper({ selfId, allowedGroups, capacity = 5000, ri
         sender: { user_id: sender.value, nickname: nickname(record) }, message: rich.message, raw_message: rich.raw };
     },
     snapshot() {
-      return { version: 1, nextAlias, entries: [...byAlias].map(([alias, entry]) => ({ alias, metadata: { ...entry.metadata }, emitted: entry.emitted })) };
+      return { version: 1, nextAlias, entries: [...byAlias].map(([alias, entry]) => ({ alias, metadata: { ...entry.metadata }, emitted: entry.emitted })), notices: [...notices] };
+    },
+    hasNotice(key) { return notices.has(key); },
+    markNotice(key) {
+      if (typeof key !== 'string' || !key.length || key.length > 256) throw new TypeError('Invalid notice key.');
+      if (notices.has(key)) return false;
+      if (notices.size >= capacity) notices.delete(notices.values().next().value);
+      notices.add(key); onChange(); return true;
     },
     lookupSequence(group, sequence) { return bySequence.get(`${group}:${sequence}`) ?? null; },
     rememberNative(record) {

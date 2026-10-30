@@ -4,11 +4,14 @@ import net from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readConfig } from '../src/config.mjs';
+import { createRestartBudget } from '../src/native/recovery.mjs';
 
 const directory = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const children = new Map();
 const startupAbort = new AbortController();
 let stopping = false, stopPromise;
+let retryTimer;
+const restartBudget = createRestartBudget();
 
 function stopChild(child, signal) {
   if (!child.pid || child.exitCode !== null || child.signalCode !== null) return;
@@ -17,7 +20,7 @@ function stopChild(child, signal) {
 }
 function shutdown(reason, exitCode) {
   if (stopping) return stopPromise;
-  stopping = true; startupAbort.abort(); process.exitCode = exitCode;
+  stopping = true; clearTimeout(retryTimer); startupAbort.abort(); process.exitCode = exitCode;
   console.log(`QQBridge container stopping: ${reason}`);
   stopPromise = (async () => {
     const active = [...children.values()];
@@ -28,20 +31,36 @@ function shutdown(reason, exitCode) {
   })();
   return stopPromise;
 }
-function launch(name, command, args) {
+function launch(name, command, args, environment = process.env) {
   if (stopping) throw new Error('Container is stopping.');
   const child = spawn(command, args, {
-    cwd: directory, env: process.env, stdio: 'inherit', detached: true,
+    cwd: directory, env: environment, stdio: 'inherit', detached: true,
   });
   const closed = new Promise(resolve => {
     child.once('close', (code, signal) => {
       children.delete(name); resolve();
+      if (!stopping && name === 'native runtime') {
+        // Once a fresh-QR fallback worker itself fails, keep the gateway alive
+        // and offline. Exiting the container would reset this restart budget.
+        if (environment.QQBRIDGE_RECOVERY_MANUAL && code !== 75) {
+          console.log('Native recovery stopped; check configuration and restart the service.');
+          return;
+        }
+        const next = code === 76 ? { manual: true, delayMs: 0 } : restartBudget.next();
+        console.log(next.manual ? 'Native recovery requires a fresh QR login.' : `Native recovery scheduled in ${next.delayMs} ms.`);
+        retryTimer = setTimeout(() => { if (!stopping) launchNative(next.manual, code === 76 ? 'authentication_required' : next.manual ? 'retry_limit' : ''); }, next.delayMs);
+        return;
+      }
       if (!stopping) void shutdown(`${name} exited${signal ? ` (${signal})` : ''}`, Number.isInteger(code) && code !== 0 ? code : 1);
     });
   });
   children.set(name, { process: child, closed });
   child.once('error', () => { if (!stopping) void shutdown(`could not start ${name}`, 1); });
   return child;
+}
+function launchNative(manual = false, reason = '') {
+  const environment = manual ? { ...process.env, QQBRIDGE_FORCE_QR: '1', QQBRIDGE_LOGIN_UIN: '', QQBRIDGE_RECOVERY_MANUAL: reason } : process.env;
+  return launch('native runtime', 'sh', ['scripts/run-native-runtime.sh'], environment);
 }
 async function waitForBridge(host, port, signal) {
   const deadline = Date.now() + 10000;
@@ -76,7 +95,7 @@ try {
   launch('gateway', process.execPath, ['src/cli.mjs', 'start']);
   await waitForBridge(config.bridgeHost, config.bridgePort, startupAbort.signal);
   if (!stopping) {
-    launch('native runtime', 'sh', ['scripts/run-native-runtime.sh']);
+    launchNative();
     console.log('Gateway and native runtime started. Waiting for QQ login; no messages are sent automatically.');
   }
 } catch {

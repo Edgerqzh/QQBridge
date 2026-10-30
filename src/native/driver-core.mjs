@@ -13,6 +13,8 @@ import { createAudioTranscoder } from './audio.mjs';
 import { prepareNativePicture } from './picture-paths.mjs';
 import { createMessageIndex } from './message-index.mjs';
 import { createContextActions, messageAlias } from './context-actions.mjs';
+import { createNoticeMapper } from './notices.mjs';
+import { createRecoveryController } from './recovery.mjs';
 
 const failure = (message, retcode = 1503) => Object.assign(new Error(message), { retcode });
 const validUin = value => typeof value === 'string' && /^[1-9]\d{4,11}$/.test(value) && Number.isSafeInteger(Number(value));
@@ -50,6 +52,7 @@ export function createDriverCore({
   native, metadata, profile, prepareProfile, emitEvent = () => {}, emitStatus = () => {},
   allowedGroups, loginUin = '', experimentalRichMedia = false, createSession = createLinuxSession, createIndex = createMessageIndex, persistSelectedAccount = async () => {},
   connectionTimeoutMs = 10000, qrTimeoutMs = 12000, accountTimeoutMs = 12000, sendTimeoutMs = 12000,
+  requestRestart = () => {}, recoveryGraceMs = 15000, forceQr = false, manualRecoveryReason = '',
 }) {
   if (typeof prepareProfile !== 'function') throw new TypeError('prepareProfile is required.');
   if (loginUin !== '' && !validUin(loginUin)) throw new TypeError('QQBRIDGE_LOGIN_UIN must be an explicit valid QQ account number.');
@@ -65,6 +68,8 @@ export function createDriverCore({
   let engine, login, machineId, qr = null, qrPending = null, connectPending = null, lastEvent = null, qrRevision = 0;
   let selectedAccount = null, session = null, mapper = null, generation = 0, sessionAttempted = false;
   let messageIndex = null, eventTail = Promise.resolve(), queuedEvents = 0;
+  let noticeMapper = null, primeTail = Promise.resolve(), transportInvalidated = false;
+  let previousMembership = new Set();
   let startPromise = null, stopPromise = null, rememberedQuickRequest = null;
   let rememberedSelection = false, userLoggedInUin = null, sessionStartHandle = null;
   let ignoreQrCancellation = false, qrFailure = null, rememberChoice = false, selectionSaveFailed = false, selectionWrite = Promise.resolve();
@@ -86,6 +91,7 @@ export function createDriverCore({
       if (state.stage === 'account_login_failed' || state.stage === 'unexpected_account_event') { loginFailed = true; stage = state.stage; }
       notify();
       requestSessionIfEligible();
+      if (state.stage === 'account_login_failed' && !forceQr && (loginUin || rememberChoice)) recovery.observe({ online: false, sessionReady: true, reason: 'login_failed' });
     },
   });
   const accountActions = createAccountActions({ getSession: () => session, getAccount: () => selectedAccount, timeoutMs: accountTimeoutMs });
@@ -99,14 +105,17 @@ export function createDriverCore({
         if (group !== undefined && (!membership.has(group) || (allow && !allow.has(group)))) throw failure('Message group is unavailable or not allowed.', 1403);
       } };
   } });
+  const recovery = createRecoveryController({ requestRestart, graceMs: recoveryGraceMs, onChange: () => notify(),
+    canRestore: () => Boolean(!forceQr && loginUin || rememberChoice || rememberedSelection) });
   const sessionState = () => { try { return session?.status() ?? {}; } catch { return {}; } };
   function status() {
     const account = flow.snapshot(), core = sessionState();
-    const online = core.online === true && transportConnected && !stopped && !loginFailed;
+    const online = core.online === true && transportConnected && !transportInvalidated && !stopped && !loginFailed;
+    const recovering = recovery.status();
     return {
       online, good: online && core.good === true && !observerFailed && !messageIndex?.status().failed,
       self_id: account.self_id, nickname: account.nickname,
-      stage: stopped ? 'stopped' : loginFailed ? stage : online ? 'online' : selectedAccount || account.scan_confirmed || account.account_selected ? account.stage : stage,
+      stage: stopped ? 'stopped' : online ? 'online' : ['waiting', 'restart_requested'].includes(recovering.phase) ? 'recovering' : recovering.phase === 'manual_required' ? 'authentication_required' : loginFailed ? stage : selectedAccount || account.scan_confirmed || account.account_selected ? account.stage : stage,
       native_loaded: true, transport_connected: transportConnected,
       session_ready: core.session_ready === true && !stopped,
     };
@@ -118,6 +127,7 @@ export function createDriverCore({
   }
   function clearAccount() {
     receivedMedia.clear();
+    noticeMapper?.close();
     generation++; selectedAccount = null; mapper = null; membership.clear(); groupListObserved = false; deferredGroups = null;
     rememberedSelection = false; userLoggedInUin = null;
     clearImmediate(sessionStartHandle); sessionStartHandle = null;
@@ -236,10 +246,58 @@ export function createDriverCore({
       const activeMapper = createMessageMapper({ selfId: account.uin, allowedGroups: allow, richMedia: experimentalRichMedia, initialState: savedMessages, onChange: () => index.changed() });
       messageIndex = index; mapper = activeMapper;
       const isCurrent = () => !stopped && current === generation && selectedAccount?.uin === account.uin && selectedAccount?.uid === account.uid;
+      const checkCurrent = () => { if (!isCurrent() || !status().online) throw failure('Notice account session changed.'); };
+      const activeNotices = createNoticeMapper({ account, mapper: activeMapper, checkCurrent,
+        getServices: () => session.getServices(),
+        isObservedMember: group => membership.has(group),
+        allowed: (group, selfDeparture = false) => (!allow || allow.has(group)) && (membership.has(group) || selfDeparture && previousMembership.has(group)),
+      });
+      noticeMapper = activeNotices;
+      let wasOnline = false, everOnline = false;
+      const priming = new Set();
       function updateGroups() {
         if (!isCurrent() || deferredGroups === null || !accountActions.updateGroupList(deferredGroups)) return;
+        for (const group of membership) { if (previousMembership.size < 10000) previousMembership.add(group); }
         membership = new Set(deferredGroups.map(record => groupId(record.groupCode)).filter(Boolean));
         groupListObserved = true; deferredGroups = null;
+        for (const group of [...membership].filter(group => !allow || allow.has(group)).slice(0, 256)) {
+          if (priming.has(group) || priming.size >= 256) continue;
+          priming.add(group);
+          primeTail = primeTail.catch(() => {}).then(() => isCurrent() && status().online ? activeNotices.prime(group) : undefined).finally(() => priming.delete(group));
+        }
+      }
+      function queueRecords(records, updateOnly = false) {
+        if (!isCurrent() || !Array.isArray(records) || !status().online) return;
+        for (const record of records) {
+          const group = groupId(record?.peerUin);
+          if (record?.chatType !== 2 || !group || (allow && !allow.has(group))) continue;
+          if (queuedEvents >= 2500) { observerFailed = true; notify(); continue; }
+          queuedEvents++;
+          eventTail = eventTail.catch(() => {}).then(async () => {
+            try {
+              checkCurrent();
+              const notices = await activeNotices.fromRecord(record);
+              if (notices.length) {
+                await index.flush(); checkCurrent();
+                for (const notice of notices) {
+                  emitEvent(notice);
+                  if (notice.notice_type === 'group_decrease' && notice.user_id === Number(account.uin)) {
+                    membership.delete(group); previousMembership.delete(group); accountActions.invalidate();
+                  }
+                }
+                return;
+              }
+              if (updateOnly) return;
+              if (experimentalRichMedia && membership.has(group)) await contextActions.hydrateReplies(record);
+              checkCurrent();
+              const event = activeMapper.fromNative(record);
+              if (!event) return;
+              if (experimentalRichMedia) receivedMedia.remember(record);
+              await index.flush(); checkCurrent(); emitEvent(event);
+            } catch { if (isCurrent() && status().online) { observerFailed = true; notify(); } }
+            finally { queuedEvents--; }
+          });
+        }
       }
       session = createSession({
         native, engine, account, profile, metadata, machineId,
@@ -254,6 +312,20 @@ export function createDriverCore({
         onState(state) {
           if (!isCurrent()) return;
           flow.onSessionOnlineEvidence(state); updateGroups(); notify();
+          const online = status().online;
+          if (wasOnline && !online) {
+            previousMembership = new Set(membership); membership.clear(); groupListObserved = false;
+            accountActions.invalidate(); activeNotices.invalidate();
+          }
+          if (!wasOnline && online && everOnline) {
+            queueMicrotask(() => {
+              if (!isCurrent()) return;
+              try { Promise.resolve(session.getServices().groupService.getGroupList(true)).catch(() => {}); } catch {}
+            });
+          }
+          wasOnline = online;
+          everOnline ||= online;
+          recovery.observe({ online, sessionReady: state.session_ready === true, reason: 'msf_disconnected' });
         },
         onMessage(records) {
           if (!isCurrent() || !Array.isArray(records)) return;
@@ -263,26 +335,14 @@ export function createDriverCore({
             const group = groupId(record?.peerUin);
             if (record?.chatType === 2 && group && membership.has(group) && (!allow || allow.has(group))) receivedMedia.remember(record);
           }
-          if (!status().online) return;
-          for (const record of records) {
-            const group = groupId(record?.peerUin);
-            if (record?.chatType !== 2 || !group || (allow && !allow.has(group))) continue;
-            if (queuedEvents >= 2500) { observerFailed = true; notify(); continue; }
-            queuedEvents++;
-            eventTail = eventTail.catch(() => {}).then(async () => {
-              try {
-                if (!isCurrent() || !status().online) return;
-                if (experimentalRichMedia && membership.has(group)) await contextActions.hydrateReplies(record);
-                if (!isCurrent() || !status().online) return;
-                const event = activeMapper.fromNative(record);
-                if (!event) return;
-                if (experimentalRichMedia) receivedMedia.remember(record);
-                await index.flush();
-                if (isCurrent() && status().online) emitEvent(event);
-              } catch { observerFailed = true; notify(); }
-              finally { queuedEvents--; }
-            });
-          }
+          queueRecords(records);
+        },
+        onMessageUpdate: records => queueRecords(records, true),
+        onAuthenticationRequired(reason) {
+          if (!isCurrent()) return;
+          loginFailed = true; transportInvalidated = true; stage = 'authentication_required';
+          generation++; flow.onFailed(); rejectPending(failure('QQ authentication must be renewed.'));
+          recovery.authenticationRequired(reason); notify();
         },
         onGroupList(records) {
           if (!isCurrent() || !Array.isArray(records)) return;
@@ -310,10 +370,12 @@ export function createDriverCore({
       signalRememberedRecords();
     },
     onLoginDisconnected() {
+      const hadSession = sessionAttempted && Boolean(session);
       transportConnected = false; if (!loginFailed) stage = 'disconnected'; qr = null;
       rememberedReads = 0; rememberedRevision++; cancelRememberedRead?.();
       clearAccount(); if (!session) sessionAttempted = false; flow.onDisconnected();
       rejectPending(failure('QQ login transport disconnected.')); notify();
+      if (hadSession) { transportInvalidated = true; recovery.observe({ online: false, sessionReady: true, reason: 'login_transport_disconnected' }); }
     },
     onLoginRecordUpdate() { signalRememberedRecords(); },
     onQRCodeGetPicture(data) {
@@ -340,8 +402,10 @@ export function createDriverCore({
     onLoginFailed() {
       loginFailed = true; stage = 'login_failed'; qr = null; clearAccount(); flow.onFailed();
       rejectPending(failure('QQ login failed.')); notify();
+      if (!forceQr && (loginUin || rememberChoice)) recovery.observe({ online: false, sessionReady: true, reason: 'login_failed' });
     },
     onQRCodeLoginSucceed(info) {
+      if (forceQr && qrRevision === 0) return;
       if (qrRevision === 0 && loginUin && !rememberedSelection) {
         const account = sanitizeAccount(info);
         if (!account || account.uin !== loginUin || !account.uid) throw failure('Native account restoration did not match the selected saved account.', 1409);
@@ -418,6 +482,7 @@ export function createDriverCore({
         ...account, ...status(), session: sessionState(), last_event: lastEvent, qq_version: metadata.version,
         qr_failure: qrFailure, saved_selection_error: selectionSaveFailed, media_downloads: receivedMedia.status(), audio: audio.status(),
         message_index: messageIndex?.status() ?? null, context_reads: contextActions.status(),
+        notices: noticeMapper?.status() ?? null, recovery: { ...recovery.status(), manual_reason: manualRecoveryReason || null },
         remembered_login: { configured: Boolean(loginUin), selected_via_cache: rememberedSelection, lookup_reads: rememberedReads, lookup_pending: rememberedBusy, lookup_limit: maxRememberedReads },
       };
       if (['get_msg', 'get_group_msg_history', 'get_group_member_list', 'get_group_member_info'].includes(action)) return contextActions.call(action, params);
@@ -520,7 +585,7 @@ export function createDriverCore({
     stop() {
       if (stopPromise) return stopPromise;
       stopped = true; transportConnected = false; stage = 'stopped'; generation++;
-      flow.stop(); accountActions.close(); contextActions.close(); audio.close(); cancelRememberedRead?.(); rejectPending(failure('QQ native driver stopped.'));
+      recovery.stop(); noticeMapper?.close(); flow.stop(); accountActions.close(); contextActions.close(); audio.close(); cancelRememberedRead?.(); rejectPending(failure('QQ native driver stopped.'));
       clearImmediate(sessionStartHandle); sessionStartHandle = null;
       stopPromise = (async () => {
         try { await selectionWrite; } catch {}

@@ -1,22 +1,41 @@
 import { WebSocket } from 'ws';
 
 /** Run inside a compatible QQ host. A real driver must provide the QQ operations. */
-export async function connectRuntime({ url, token, createDriver, handshakeTimeoutMs = 5000 }) {
+export async function connectRuntime({ url, token, createDriver, handshakeTimeoutMs = 5000, onRestart = () => {} }) {
   const endpoint = new URL(url);
   if (endpoint.protocol !== 'ws:' || !['127.0.0.1', 'localhost', '[::1]'].includes(endpoint.hostname) || endpoint.pathname !== '/bridge') throw new Error('Runtime IPC must use a loopback ws:// URL ending in /bridge');
   if (!token) throw new Error('Bridge token is required');
   let ws; let ready = false; let closed = false; let timer; let currentStatus = {};
+  let restartRequest = null, restarting = false;
+  function requestRestart(request = {}) {
+    if (closed || restarting) return;
+    restartRequest ??= { mode: request.mode === 'manual' ? 'manual' : 'automatic', reason: String(request.reason ?? 'ipc_disconnected').slice(0, 80) };
+    if (!ready) return;
+    restarting = true;
+    setImmediate(() => { stop().catch(() => {}).finally(() => onRestart(restartRequest)); });
+  }
   const send = (frame) => { if (ready && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(frame)); };
   const driver = await createDriver({
     emitEvent: (event) => send({ type: 'event', event }),
     emitStatus: (status) => { currentStatus = status; send({ type: 'status', status }); },
+    requestRestart,
   });
   if (!driver || !Array.isArray(driver.actions) || typeof driver.start !== 'function' || typeof driver.call !== 'function' || typeof driver.stop !== 'function' || typeof driver.status !== 'function') throw new Error('Invalid QQ driver contract');
   let stopping;
   async function stop() {
     if (stopping) return stopping;
     closed = true; ready = false; clearTimeout(timer);
-    stopping = Promise.resolve().then(() => driver.stop()).finally(() => ws?.terminate());
+    stopping = Promise.resolve().then(() => driver.stop()).finally(async () => {
+      if (!ws || ws.readyState === WebSocket.CLOSED) return;
+      await new Promise(resolve => {
+        let closeTimer;
+        const finish = () => { clearTimeout(closeTimer); resolve(); };
+        ws.once('close', finish);
+        closeTimer = setTimeout(() => { ws.terminate(); finish(); }, 1000);
+        if (ws.readyState === WebSocket.OPEN) ws.close(1000, 'Native runtime stopping');
+        else ws.terminate();
+      });
+    });
     return stopping;
   }
   try {
@@ -55,7 +74,8 @@ export async function connectRuntime({ url, token, createDriver, handshakeTimeou
         }
       });
     });
-    ws.once('close', () => { stop().catch(() => {}); });
+    ws.once('close', () => { if (!closed) requestRestart({ reason: 'ipc_disconnected' }); });
+    if (restartRequest) requestRestart(restartRequest);
     return { stop, driver };
   } catch (err) { await stop().catch(() => {}); throw err; }
 }

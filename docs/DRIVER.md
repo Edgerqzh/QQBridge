@@ -15,7 +15,7 @@ QQBridge 原生 runtime + 指定 QQ 本地模块
 QQ 服务
 ```
 
-推荐使用 `compose.native.yaml`：构建时准备官方 QQ 和共享库，由 `scripts/run-container.mjs` 在同一容器内启动网关与原生 runtime，并在任一子进程退出时联停另一进程。资料保存在 named volume，API 仅发布宿主回环端口。完整容器的新卷启动和真实二维码已验证。
+推荐使用 `compose.native.yaml`：构建时准备官方 QQ 和共享库，由 `scripts/run-container.mjs` 在同一容器内启动网关与原生 runtime。网关退出时联停原生 runtime，原生退出按 [恢复预算](EVENTS_RECOVERY.md) 单独重启或等待人工处理。资料保存在 named volume，API 仅发布宿主回环端口。完整容器的新卷启动和真实二维码已验证。
 
 手动运行时，准备官方 QQ 和共享库后，在同一网络命名空间中分别启动 `npm start` 与 `sh scripts/run-native-runtime.sh`。原生脚本编译 C 兼容层、预加载 `libgnutls.so.30`、读取 `.env` 并选择 Linux 驱动。具体步骤见 [README](../README.md)。普通 `Dockerfile` / `compose.yaml` 保留为仅网关模式。
 

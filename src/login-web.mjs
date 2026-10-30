@@ -28,7 +28,7 @@ const server=createServer(async(req,res)=>{
     if(req.method==='GET'&&pathname==='/api/state'){
       const r=await call('get_login_state');if(r.status!=='ok')return send(503,{error:'QQ 服务未连接，正在等待启动。'});
       const d=r.data;return send(200,{stage:d.stage,online:d.online,authenticated:d.authenticated,scan_confirmed:d.scan_confirmed,
-        session_ready:d.session_ready,restore_pending:d.remembered_login?.configured===true&&!d.account_selected&&['connecting','connected','remembered_account_loading'].includes(d.stage),nickname:d.nickname,self_id:d.self_id,qr_failure:d.qr_failure});
+        session_ready:d.session_ready,restore_pending:d.remembered_login?.configured===true&&!d.account_selected&&['connecting','connected','remembered_account_loading'].includes(d.stage),nickname:d.nickname,self_id:d.self_id,qr_failure:d.qr_failure,recovery:d.recovery});
     }
     if(req.method==='POST'&&pathname==='/api/qr'){
       if(req.headers['content-type']!=='application/json')return send(415,{error:'请求格式无效。'});

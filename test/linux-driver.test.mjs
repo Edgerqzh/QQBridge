@@ -82,6 +82,7 @@ async function fixture(t, options = {}) {
     experimentalRichMedia: options.experimentalRichMedia, allowedGroups: options.allowedGroups, loginUin: options.loginUin ?? '',
     createIndex: options.createIndex ?? (() => ({ load: async () => undefined, changed() {}, flush: async () => {}, status: () => ({ dirty: false, failed: false }) })),
     connectionTimeoutMs: 80, qrTimeoutMs: 80, accountTimeoutMs: 80, sendTimeoutMs: options.sendTimeoutMs ?? 80,
+    requestRestart: options.requestRestart, recoveryGraceMs: options.recoveryGraceMs, forceQr: options.forceQr,
     createSession(value) {
       calls.push(['create-session', value.account]); sessionOptions = value;
       const state = { session_ready: false, online: false, good: false };
@@ -94,11 +95,14 @@ async function fixture(t, options = {}) {
         stop() { calls.push(['session-stop']); state.online = false; state.session_ready = false; value.onState({ ...state }); },
         status() {
           const online = state.online || (options.authenticatedReady === true && state.session_ready && value.getAuthenticationEvidence());
-          return { ...state, online, good: online };
+          return { ...state, online: state.forcedOffline ? false : online, good: state.forcedOffline ? false : online };
         },
         authenticationEvidence: () => value.getAuthenticationEvidence(),
         getServices: () => ({ msgService, groupService }),
-        online() { Object.assign(state, { session_ready: true, online: true, good: true, online_message_observed: true, msf_status: 1, msf_error: 0 }); value.onState({ ...state }); },
+        online() { Object.assign(state, { forcedOffline: false, session_ready: true, online: true, good: true, online_message_observed: true, msf_status: 1, msf_error: 0 }); value.onState({ ...state }); },
+        offline() { Object.assign(state, { forcedOffline: true, online: false, good: false, msf_status: 0 }); value.onState({ ...state }); },
+        updates(raw) { value.onMessageUpdate(raw); },
+        authenticationRequired() { value.onAuthenticationRequired('kicked_offline'); },
         receive(raw) { value.onMessage(raw); },
         groups(raw) { value.onGroupList(raw); },
       };
@@ -557,6 +561,51 @@ test('a disconnect after native acceptance preserves uncertainty and never retri
   f.listener().onLoginDisConnected(); accepted({ result: 0 });
   await assert.rejects(send, /accepted.*session changed.*Do not resend/);
   assert.equal(f.calls.filter(c => c[0] === 'send').length, 1);
+});
+
+test('native message updates publish a deduplicated recall with the original event ID', async t => {
+  const f = await fixture(t, { groupService: { getUinByUids: ids => ({errCode:0,uins:new Map(ids.map(id=>[id,'987654321']))}) } });
+  await f.select(); await f.online(); await f.driver.call('get_group_list');
+  f.sessions[0].receive([record()]);await waitFor(()=>f.timeline.some(x=>x[0]==='event'));
+  const original=f.timeline.find(x=>x[0]==='event')[1];
+  const recalled=record({isOnlineMsg:false,recallTime:'1800000000',elements:[{elementType:8,grayTipElement:{subElementType:1,revokeElement:{origMsgSenderUid:'u_fixture_sender',operatorUid:'u_fixture_sender'}}}]});
+  f.sessions[0].updates([recalled,recalled]);await waitFor(()=>f.timeline.some(x=>x[1]?.notice_type==='group_recall'));
+  const notice=f.timeline.filter(x=>x[1]?.notice_type==='group_recall');assert.equal(notice.length,1);assert.equal(notice[0][1].message_id,original.message_id);
+});
+
+test('MSF recovery clears group permissions until a fresh snapshot and cancels a short outage restart', async t => {
+  const restarts=[];const f=await fixture(t,{recoveryGraceMs:100,requestRestart:r=>restarts.push(r)});
+  await f.select();await f.online();await f.driver.call('get_group_list');
+  f.sessions[0].offline();assert.equal(f.driver.status().online,false);assert.equal(f.driver.status().stage,'recovering');
+  await assert.rejects(f.driver.call('send_group_msg',{group_id:10001,message:'fixture'}),{retcode:1503});
+  await f.online();
+  await assert.rejects(f.driver.call('send_group_msg',{group_id:10001,message:'fixture'}));
+  f.sessions[0].groups(groups);await f.driver.call('send_group_msg',{group_id:10001,message:'fixture'});
+  assert.equal(restarts.length,0);assert.equal(f.calls.filter(x=>x[0]==='send').length,1);
+});
+
+test('a disconnected initialized login transport requests one worker restart and never reuses the old kernel', async t => {
+  const restarts=[];const f=await fixture(t,{loginUin:account.uin,recoveryGraceMs:5,requestRestart:r=>restarts.push(r)});
+  await f.online();await f.driver.call('get_group_list');f.listener().onLoginDisConnected();f.listener().onLoginConnected();
+  await waitFor(()=>restarts.length===1);assert.equal(restarts[0].mode,'automatic');assert.equal(f.driver.status().online,false);
+  assert.equal(f.calls.filter(x=>x[0]==='session-start').length,1);assert.equal(f.calls.filter(x=>x[0]==='send').length,0);
+});
+
+test('native authentication revocation requests a fresh QR process rather than automatic login', async t => {
+  const restarts=[];const f=await fixture(t,{requestRestart:r=>restarts.push(r)});await f.select();await f.online();
+  f.sessions[0].authenticationRequired();await waitFor(()=>restarts.length===1);
+  assert.equal(restarts[0].mode,'manual');assert.equal(f.driver.status().online,false);
+});
+
+test('generic remembered-login failure is recoverable and is not misclassified as revoked authentication', async t => {
+  const restarts=[];const f=await fixture(t,{loginUin:account.uin,recoveryGraceMs:5,requestRestart:r=>restarts.push(r)});
+  await f.online();f.listener().onLoginFailed();await waitFor(()=>restarts.length===1);
+  assert.equal(restarts[0].mode,'automatic');assert.equal(f.calls.filter(x=>x[0]==='send').length,0);
+});
+
+test('force-QR recovery ignores unsolicited cached account callbacks until a QR was requested', async t => {
+  const f=await fixture(t,{forceQr:true});await f.select();assert.equal(f.sessions.length,0);
+  await f.driver.call('get_login_qrcode');await f.select();assert.equal(f.sessions.length,1);
 });
 
 test('fresh QR refresh cancels an existing session and ignores only its expected cancellation',async t=>{

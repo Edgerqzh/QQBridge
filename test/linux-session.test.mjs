@@ -63,6 +63,18 @@ async function fixture(t, overrides = {}) {
   return { core, order, state, account, forwarded, observed, session, msgService, groupService };
 }
 
+test('native recall updates are forwarded separately and cannot invent online evidence', async t => {
+  const updates=[];const f=await fixture(t,{options:{onMessageUpdate:r=>updates.push(r)}});await f.core.start();
+  f.state.msgListener.onMsgInfoListUpdate([{recallTime:'1800000000'}]);
+  assert.equal(updates.length,1);assert.equal(f.core.status().online,false);assert.equal(f.core.status().online_message_observed,false);
+});
+
+test('kicked-offline and SSO authentication failures revoke online status and notify once', async t => {
+  const reasons=[];const f=await fixture(t,{options:{getAuthenticationEvidence:()=>true,onAuthenticationRequired:r=>reasons.push(r)}});await f.core.start();f.state.depends.onMSFStatusChange(1,0);
+  assert.equal(f.core.status().online,true);f.state.msgListener.onKickedOffLine();f.state.depends.onMSFSsoError();
+  assert.equal(f.core.status().online,false);assert.deepEqual(reasons,['kicked_offline']);
+});
+
 test('uses the native module-to-session map and initializes before the one-time startup', async t => {
   const f = await fixture(t);
   assert.throws(() => f.core.getServices(), /not initialized/);

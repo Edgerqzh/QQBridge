@@ -27,7 +27,7 @@ test('native rejection is explicit and a new request can recover',async t=>{
 });
 test('hung SDK downloads time out without releasing native concurrency or silently retrying',async t=>{
   const profile=await root(t);let complete,calls=0;
-  const cache=createReceivedMediaCache({profile,timeoutMs:10,maxConcurrent:1,getMsgService:()=>({downloadRichMedia(){calls++;return new Promise(resolve=>complete=resolve);}})});
+  const cache=createReceivedMediaCache({profile,timeoutMs:1000,maxConcurrent:1,getMsgService:()=>({downloadRichMedia(){calls++;return new Promise(resolve=>complete=resolve);}})});
   cache.remember(record());cache.remember(record('second'));
   await assert.rejects(cache.read('fixture',()=>true),e=>e.retcode===1504);
   await assert.rejects(cache.read('fixture',()=>true));assert.equal(calls,1);
@@ -60,7 +60,9 @@ test('void native dispatch waits for verified bytes and cancellation is forwarde
   const service={getRichMediaElement(p){setTimeout(()=>writeFile(p.filePath,bytes),5);},cancelGetRichMediaElement(){cancelled++;}};
   const c=createReceivedMediaCache({profile,getMsgService:()=>service,pollMs:1,timeoutMs:100});
   c.remember(record());assert.equal((await c.read('fixture',()=>true)).size,bytes.length);assert.equal(cancelled,0);c.clear();
-  const stalled=createReceivedMediaCache({profile,getMsgService:()=>({getRichMediaElement(){},cancelGetRichMediaElement(){cancelled++;}}),pollMs:1,timeoutMs:10});
+  // Allow filesystem staging to reach the native dispatch under parallel load.
+  // This assertion specifically verifies cancellation of a dispatched request.
+  const stalled=createReceivedMediaCache({profile,getMsgService:()=>({getRichMediaElement(){},cancelGetRichMediaElement(){cancelled++;}}),pollMs:1,timeoutMs:1000});
   stalled.remember(record('stalled'));await assert.rejects(stalled.read('stalled',()=>true),e=>e.retcode===1504);assert.equal(cancelled,1);stalled.clear();
 });
 test('clearing an account during queued persistence cannot erase its committed index',async t=>{

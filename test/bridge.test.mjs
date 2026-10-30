@@ -13,6 +13,18 @@ async function setup(t, options = {}) {
   return { backend, url: `ws://127.0.0.1:${backend.address().port}/bridge` };
 }
 
+test('native recovery requests stop one worker once and preserve the gateway for reconnection', async t => {
+  const {backend,url}=await setup(t);let callbacks,stops=0;const requests=[];
+  const createDriver=async cb=>{callbacks=cb;return {actions:['get_login_info'],start:async()=>{},stop:async()=>{stops++;},status:()=>({online:true,good:true,self_id:12345}),call:async()=>({user_id:12345})};};
+  const runtime=await connectRuntime({url,token,createDriver,onRestart:r=>requests.push(r)});t.after(()=>runtime.stop());
+  callbacks.requestRestart({mode:'automatic',reason:'msf_disconnected'});callbacks.requestRestart({mode:'automatic'});
+  const deadline=Date.now()+1000;while(!requests.length&&Date.now()<deadline)await new Promise(r=>setTimeout(r,2));
+  assert.equal(stops,1);assert.equal(requests.length,1);
+  const closeDeadline=Date.now()+1000;while(backend.status().bridge_connected&&Date.now()<closeDeadline)await new Promise(r=>setTimeout(r,2));
+  assert.equal(backend.status().bridge_connected,false);
+  const next=await connectRuntime({url,token,createDriver});t.after(()=>next.stop());assert.equal((await backend.call('get_login_info')).user_id,12345);
+});
+
 test('media-sized payloads cross IPC in both directions without the old one MiB cutoff', async t => {
   const { backend, url } = await setup(t);
   const runtime = await connectRuntime({ url, token, createDriver: async () => ({

@@ -11,8 +11,11 @@ async function fresh(){
 async function poll(){
  try{const r=await fetch('/api/state');const d=await r.json();if(!r.ok)throw Error(d.error);
   online=d.online===true;
+  if(!online){el('success').hidden=true;el('account').hidden=true;el('remember').disabled=false;}
   if(online){clearQR('');el('placeholder').hidden=true;el('success').hidden=false;el('title').textContent='QQ 已成功连接';el('subtitle').textContent='可以关闭此页，连接会继续运行。';el('pill').textContent='已在线';el('refresh').disabled=true;el('remember').disabled=true;el('account').hidden=false;el('account').textContent=d.nickname?`${d.nickname} · ${d.self_id}`:`QQ ${d.self_id}`;el('hint').textContent='登录完成。';}
+  else if(d.stage==='recovering'){clearQR('正在恢复连接…');el('title').textContent='QQ 连接已中断';el('subtitle').textContent='正在等待重连，必要时将重启原生服务。';el('pill').textContent='恢复中';el('refresh').disabled=true;started=false;}
   else if(d.restore_pending){el('title').textContent='正在恢复本机登录';el('subtitle').textContent='正在连接已保存的账号，请稍候。';el('refresh').disabled=true;}
+  else if(d.recovery?.manual_reason||d.stage==='authentication_required'){el('title').textContent='需要重新扫码登录';el('subtitle').textContent='登录许可已失效或自动恢复次数已用完，请获取新二维码。';el('pill').textContent='等待登录';el('refresh').disabled=false;if(!started){started=true;await fresh();}}
   else if(d.scan_confirmed||d.stage==='qr_scanned'||d.authenticated){el('title').textContent='请在手机上完成确认';el('pill').textContent='正在登录';if(d.scan_confirmed){clearQR('正在建立连接…');el('refresh').disabled=true;}}
   else if(['qr_session_expired','qr_polling_failed','login_failed','account_login_failed'].includes(d.stage)){clearQR('二维码已失效');el('title').textContent='请获取新二维码';el('hint').textContent='旧码已停止显示，请点击下方按钮生成新码。';el('refresh').disabled=false;}
   else if(!started){started=true;await fresh();}
