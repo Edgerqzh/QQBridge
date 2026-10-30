@@ -1,5 +1,6 @@
+import {faceElement,cardElement,videoElement} from './extended-segments.mjs';
 const fail = (message, retcode = 1400) => Object.assign(new Error(message), { retcode });
-export async function buildGroupSegments({ groupId, message, autoEscape, mediaStore, resolveUid, prepareImage, resolveReply, peer }) {
+export async function buildGroupSegments({ groupId, message, autoEscape, mediaStore, resolveUid, prepareImage, prepareVideo, resolveReply, peer }) {
   const targetPeer = peer ?? { chatType: 2, peerUid: String(groupId), guildId: '' };
   if (![1,2].includes(targetPeer.chatType) || targetPeer.chatType === 1 && !/^u_[A-Za-z0-9_-]{1,126}$/.test(targetPeer.peerUid)) throw fail('Invalid message peer.');
   if (autoEscape !== undefined && typeof autoEscape !== 'boolean') throw fail('auto_escape must be boolean.');
@@ -41,10 +42,16 @@ export async function buildGroupSegments({ groupId, message, autoEscape, mediaSt
       elements.push({ elementType: 1, elementId: '0', textElement: {
         content: all ? '@全体成员' : `@${uin}`, atType: all ? 1 : 2, atUid: all ? '0' : uin, atNtUid: uid,
       } });
-    } else if (['image', 'file', 'record'].includes(segment.type)) {
+    } else if(segment.type==='face')elements.push(faceElement(data));
+    else if(segment.type==='json')elements.push(cardElement(data));
+    else if (['image', 'file', 'record','video'].includes(segment.type)) {
       if (!mediaStore) throw fail('Media storage is unavailable.', 1503);
       let m = await mediaStore.prepare(data.file, segment.type, data.name);
       if (segment.type === 'image' && prepareImage) m = await prepareImage(m);
+      if(segment.type==='video'){
+        if(typeof prepareVideo!=='function')throw fail('Video preparation is unavailable.',1503);
+        elements.push(videoElement(await prepareVideo(m)));
+      }
       if (segment.type === 'image') elements.push({ elementType: 2, elementId: '0', picElement: {
         picSubType: 0, picSubSubType: 0, fileName: m.fileName, fileSize: m.size,
         picWidth: m.width, picHeight: m.height, original: true, md5HexStr: m.md5,

@@ -9,6 +9,7 @@ const ONLINE_ACTIONS = new Set([
   'get_group_member_info', 'get_group_member_list', 'get_group_msg_history', 'get_friend_info', 'get_friend_msg_history', 'get_private_msg_history', 'upload_private_file',
   'get_group_honor_info', 'get_cookies', 'get_csrf_token', 'get_credentials',
   'add_friend','get_friend_requests',
+  'get_group_requests','get_group_notice','send_group_notice','delete_group_notice','transfer_group','dismiss_group','send_group_forward_msg','send_private_forward_msg','group_poke','friend_poke',
 ]);
 
 export function failure(retcode, message, echo) {

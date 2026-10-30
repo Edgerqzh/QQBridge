@@ -2,7 +2,7 @@
 
 QQBridge 是针对单一 Linux QQ 构建的普通账号文本收发 MVP。代码能力、自动化测试和真实 QQ 验证分别记录，不将替身后端当作 QQ 接入证据。
 
-后续能力见 [富媒体说明](RICH_MEDIA.md)、[查询与引用](CONTEXT.md)、[好友私聊](PRIVATE.md) 和 [好友申请与群管理](MANAGEMENT.md)。下表保留首个文本版本的基线覆盖。
+后续能力见 [富媒体说明](RICH_MEDIA.md)、[查询与引用](CONTEXT.md)、[好友私聊](PRIVATE.md) 、[好友申请与群管理](MANAGEMENT.md) 和 [0.8 扩展功能](EXTENDED.md)。下表保留首个文本版本的基线覆盖。
 
 ## 当前范围
 

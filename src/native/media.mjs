@@ -50,8 +50,9 @@ export function createMediaStore({ directory, maxBytes = 16 * 1024 * 1024, conve
       let bytes;
       if (file.startsWith('base64://')) {
         const encoded = file.slice(9);
-        if (!encoded || encoded.length > Math.ceil(maxBytes / 3) * 4 || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(encoded)) throw fail('Invalid or oversized base64 media.');
+        if (!encoded || encoded.length > Math.ceil(maxBytes / 3) * 4 || encoded.length%4!==0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(encoded)) throw fail('Invalid or oversized base64 media.');
         bytes = Buffer.from(encoded, 'base64');
+        if(bytes.toString('base64')!==encoded)throw fail('Base64 media must use canonical encoding.');
       } else if (/^qqbridge:\/\/[a-f0-9]{64}$/.test(file)) {
         let resolved;
         for (const suffix of ['', '.png', '.jpg']) {

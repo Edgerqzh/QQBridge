@@ -94,9 +94,9 @@ export function createReceivedMediaCache({ profile, capacity = 5000, getMsgServi
   return {
     remember(record) {
       for (const element of record.elements ?? []) {
-        const value = element.picElement ?? element.fileElement ?? element.pttElement;
-        if (!value || ![2,3,4].includes(element.elementType)) continue;
-        const nativeId = [value.fileUuid,value.md5HexStr,value.fileMd5].find(v=>typeof v==='string'&&v.length>0&&v.length<=512&&!/[\\/\u0000-\u001f]/.test(v));
+        const value = element.picElement ?? element.fileElement ?? element.pttElement ?? element.videoElement;
+        if (!value || ![2,3,4,5].includes(element.elementType)) continue;
+        const nativeId = [value.fileUuid,value.md5HexStr,value.fileMd5,value.videoMd5].find(v=>typeof v==='string'&&v.length>0&&v.length<=512&&!/[\\/\u0000-\u001f]/.test(v));
         if (!nativeId) continue;
         const chatType=record.chatType===1?1:2;
         if(chatType===1&&(!/^[1-9]\d{4,11}$/.test(record.peerUin)||!/^u_[A-Za-z0-9_-]{1,126}$/.test(record.peerUid)))continue;
@@ -105,7 +105,7 @@ export function createReceivedMediaCache({ profile, capacity = 5000, getMsgServi
         if(old&&old.group===group&&old.msgId===record.msgId&&(old.chatType??2)===chatType)continue;
         if (!entries.has(id) && entries.size >= capacity) {const first=entries.keys().next().value;jobs.get(first)?.controller.abort();entries.delete(first);}
         jobs.get(id)?.controller.abort();
-        const size=Number(value.fileSize),md5=value.md5HexStr||value.fileMd5;
+        const size=Number(value.fileSize),md5=value.md5HexStr||value.fileMd5||value.videoMd5||(size>0&&size<=10*1024*1024?value.file10MMd5:null);
         entries.set(id, { group, chatType, source: value.sourcePath || value.filePath, name:value.fileName, type:element.elementType,
           msgId:record.msgId,peerUid:record.peerUid||group,elementId:element.elementId,
           size:Number.isSafeInteger(size)&&size>0?size:null,md5:typeof md5==='string'&&/^[a-fA-F0-9]{32}$/.test(md5)?md5.toLowerCase():null });

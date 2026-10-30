@@ -2,7 +2,7 @@
 
 公开源码：[Edgerqzh/QQBridge](https://github.com/Edgerqzh/QQBridge)。原创代码使用 MIT 许可。
 
-文本版已验证真实扫码、群消息收发和 OneBot WebSocket 推送。新增图片、文件、语音、提及与撤回处于显式启用的实验阶段。0.3 增加 [主动下载与语音转码](docs/DOWNLOAD_AUDIO.md)、[本地扫码登录网页](docs/LOGIN_WEB.md)，0.4 增加 [引用回复、消息查询、历史、群成员与 ID 持久化](docs/CONTEXT.md)。0.5 增加 [撤回通知、成员事件与掉线恢复](docs/EVENTS_RECOVERY.md)。0.6 增加 [好友私聊收发、查询、媒体与撤回](docs/PRIVATE.md)。0.7 增加 [好友申请与群管理](docs/MANAGEMENT.md)。详细覆盖见各阶段验证记录。
+文本版已验证真实扫码、群消息收发和 OneBot WebSocket 推送。新增图片、文件、语音、提及与撤回处于显式启用的实验阶段。0.3 增加 [主动下载与语音转码](docs/DOWNLOAD_AUDIO.md)、[本地扫码登录网页](docs/LOGIN_WEB.md)，0.4 增加 [引用回复、消息查询、历史、群成员与 ID 持久化](docs/CONTEXT.md)。0.5 增加 [撤回通知、成员事件与掉线恢复](docs/EVENTS_RECOVERY.md)。0.6 增加 [好友私聊收发、查询、媒体与撤回](docs/PRIVATE.md)。0.7 增加 [好友申请与群管理](docs/MANAGEMENT.md)。0.8 增加 [群申请、公告、转让 / 解散与扩展消息](docs/EXTENDED.md)。详细覆盖见各阶段验证记录。
 
 普通 QQ 账号接入的独立开发 MVP：使用指定 Linux QQ 客户端的原生能力，对外提供部分 OneBot 11 HTTP / WebSocket 接口，供 AI 应用接入。
 
@@ -101,6 +101,11 @@ npm run qrcode
 | `get_login_state` | 登录、账号选择、会话与在线证据状态 |
 | `get_login_info` | 当前账号信息 |
 | `get_group_list` | 原生会话返回的群列表 |
+| `get_group_requests` / `set_group_add_request` | 入群申请列表、事件与明确审批 |
+| `get_group_notice` / `send_group_notice` / `delete_group_notice` | 文字群公告的读取、发布与删除 |
+| `transfer_group` / `dismiss_group` | 仅群主转让 / 解散群；见 [验证边界](docs/EXTENDED.md) |
+| `get_forward_msg` / `send_group_forward_msg` / `send_private_forward_msg` | 读取及发送基于已有消息 ID 的合并转发 |
+| `friend_poke` / `group_poke` | 好友 / 群成员戳一戳 |
 | `get_friend_list` / `get_friend_info` | 当前好友列表及资料 |
 | `get_friend_requests` / `set_friend_add_request` / `add_friend` | 好友申请列表、事件、明确审批与主动添加 |
 | `get_group_info` / `set_group_*` | 群信息、禁言、踢人、管理员、名片、群名与退群；见 [权限与边界](docs/MANAGEMENT.md) |

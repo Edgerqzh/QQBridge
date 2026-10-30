@@ -61,7 +61,7 @@ const shape = value => {
  */
 export function createLinuxSession({
   native, engine, account, profile, metadata, machineId,
-  onState = () => {}, onMessage, onMessageUpdate, onGroupList, onFriendList, onFriendRequests, onAuthenticationRequired, onUnsupportedDependency = () => {},
+  onState = () => {}, onMessage, onMessageUpdate, onGroupList, onFriendList, onFriendRequests, onGroupRequests, onGroupBulletin, onAuthenticationRequired, onUnsupportedDependency = () => {},
   forwardDispatcher, initTimeoutMs = 20000, getAuthenticationEvidence = () => false, getAuthenticationEvidenceType = () => 'native_login_result',
 }) {
   if (typeof account?.uin !== 'string' || !/^\d{5,12}$/.test(account.uin) ||
@@ -261,7 +261,7 @@ export function createLinuxSession({
     }, onKickedOffLine: () => authenticationRequired('kicked_offline') });
     msgService.addKernelMsgListener(msgListener); state.message_listener_attached = true;
     if (typeof onGroupList === 'function') {
-      groupListener = notificationAdapter({ onGroupListUpdate: updateGroups });
+      groupListener = notificationAdapter({ onGroupListUpdate: updateGroups,onGroupNotifiesUpdated:(doubt,rows)=>{if(!stopped)observer(onGroupRequests,doubt,rows);},onGroupBulletinChange:(group,rows)=>{if(!stopped)observer(onGroupBulletin,group,rows);} });
       groupService.addKernelGroupListener(groupListener); state.group_listener_attached = true;
     }
   }

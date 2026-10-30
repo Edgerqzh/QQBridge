@@ -13,7 +13,7 @@ function groupFixture(t,role=4){
   const calls=[];let valid=true,complete=true,ack={result:0},rows=[{...own,role},target];
   const service={getAllMemberList:async(g,force)=>{assert.equal(force,true);return {errCode:0,result:{finish:complete,infos:new Map(rows.map(r=>[r.uid,r]))}};}};
   for(const method of ['setMemberShutUp','setGroupShutUp','kickMember','modifyMemberRole','modifyMemberCardName','modifyGroupName','quitGroup'])service[method]=(...args)=>{calls.push([method,...args]);return ack;};
-  const manager=createGroupManagement({timeoutMs:40,getContext:()=>({account:own,services:{groupService:service},groups:()=>[{groupCode:'10001',groupName:'Fixture',maxMember:200}],check(g){if(!valid||g!=='10001')throw Object.assign(Error('scope'),{retcode:1403});}})});t.after(()=>manager.close());
+  const manager=createGroupManagement({timeoutMs:40,getContext:()=>({account:own,services:{groupService:service},groups:()=>[{groupCode:'10001',groupName:'Fixture',maxMember:200}],check(g){if(!valid||g!==undefined&&g!=='10001')throw Object.assign(Error('scope'),{retcode:1403});}})});t.after(()=>manager.close());
   return {manager,calls,service,setRows:v=>rows=v,setValid:v=>valid=v,setComplete:v=>complete=v,setAck:v=>ack=v};
 }
 test('group mutations use verified member UIDs and exact native argument shapes',async t=>{

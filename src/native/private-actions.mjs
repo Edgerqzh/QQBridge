@@ -15,7 +15,12 @@ export function createPrivateActions({getContext,timeoutMs=8000}) {
   }
   function records(result,c,friend,limit){
     if(result?.result!==0||!Array.isArray(result.msgList)||result.msgList.length>limit)throw fail('Invalid private message list.');
-    for(const r of result.msgList)if(r.chatType!==1||r.peerUid!==friend.uid||String(r.peerUin)!==friend.uin||typeof r.msgId!=='string'||!/^[1-9]\d{0,63}$/.test(r.msgId)||![friend.uin,c.account.uin].includes(r.senderUin))throw fail('Private record belongs to another conversation.',1403);
+    for(const r of result.msgList)if(r.chatType!==1||r.peerUid!==friend.uid||String(r.peerUin)!==friend.uin||typeof r.msgId!=='string'||!/^[1-9]\d{0,63}$/.test(r.msgId))throw fail('Private record belongs to another conversation.',1403);
+    // Native friend-system notices have sender zero, type 5, and gray-only
+    // elements. They belong to this peer but are not user history messages;
+    // retain them as pagination anchors while the mapper omits their bodies.
+    const messages=result.msgList.filter(r=>!(r.senderUin==='0'&&r.msgType===5&&Array.isArray(r.elements)&&r.elements.length>0&&r.elements.every(e=>e.elementType===8&&e.grayTipElement)));
+    for(const r of messages)if(![friend.uin,c.account.uin].includes(r.senderUin))throw fail('Private record has an unrelated sender.',1403);
     return result.msgList;
   }
   async function getRecord(id,expected){

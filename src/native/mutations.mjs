@@ -21,7 +21,7 @@ export function createMutationRunner({timeoutMs=8000,maxConcurrent=4}={}){
   };
 }
 export function requireAck(result){
-  if(!result||result.result!==0)throw fail('QQ rejected the management operation.',1500);
+  if(!result||result.result!==0)throw fail('QQ rejected the management operation'+(Number.isInteger(result?.result)?' (code '+result.result+')':'')+'.',1500);
 }
 export function strictBoolean(value,fallback,label){
   if(value===undefined)return fallback;

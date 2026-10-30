@@ -1,4 +1,5 @@
 import { receivedSegments } from './received-segments.mjs';
+import {forwardHandle} from './extended-segments.mjs';
 const MAX_ALIAS = 0x7fffffff;
 const MAX_UNIX_SECONDS = 253402300799;
 
@@ -152,7 +153,7 @@ export function createMessageMapper({ selfId, allowedGroups, capacity = 5000, ri
       if (bySeq !== undefined && (parsed.value.chatType!==1 || !timestamp(reply?.replyMsgTime) || byAlias.get(bySeq)?.metadata.msgTime===String(reply.replyMsgTime))) return bySeq;
       if (!nativeIdentifier(nativeId)) return null;
       return remember(metadata({ chatType: parsed.value.chatType, peerUin: parsed.peer.text, peerUid: parsed.value.peerUid, msgId: nativeId, msgSeq: reply?.replayMsgSeq, senderUin: reply?.senderUid }));
-    }, id => parsed.value.chatType === 1 ? `private:${parsed.peer.text}:${id}` : id) : (() => { const text = textContent(record.elements); return text === null ? null : { message: [{ type: 'text', data: { text } }], raw: cqText(text) }; })();
+    }, id => parsed.value.chatType === 1 ? `private:${parsed.peer.text}:${id}` : id,()=>forwardHandle(remember(parsed))) : (() => { const text = textContent(record.elements); return text === null ? null : { message: [{ type: 'text', data: { text } }], raw: cqText(text) }; })();
   }
 
   return {

@@ -62,6 +62,7 @@ async function fixture(t, options = {}) {
     ...options.msgService,
   };
   const groupService = {
+    getSingleScreenNotifies(){sessionOptions.onGroupRequests(false,options.groupNotifications??[]);return {result:0};},
     getUidByUins(uins) { return { errCode: 0, uids: new Map(uins.map(uin => [uin, 'u_fixture_target'])) }; },
     getGroupList(force) {
       assert.equal(force, false); calls.push(['group-list']);
@@ -149,6 +150,13 @@ test('management actions route through driver scope checks and current group per
   await assert.rejects(f.driver.call('set_group_name',{group_id:10001,group_name:'Fixture'}),{retcode:1403});
   await assert.rejects(f.driver.call('set_group_card',{group_id:10002,user_id:account.uin,card:'Fixture'}),{retcode:1403});
   f.sessions[0].offline();await assert.rejects(f.driver.call('set_group_card',{group_id:10001,user_id:account.uin,card:'Fixture'}),{retcode:1503});
+});
+
+test('group request snapshots and structured poke notifications reach the driver event channel',async t=>{
+  const uid='u_fixture_target',uin='987654321';const f=await fixture(t,{groupNotifications:[{seq:'7000000000000000005',type:1,status:1,group:{groupCode:'10001'},user1:{uid},actionTime:'1793340000',postscript:'Fixture request'}],groupService:{getUinByUids:()=>({errCode:0,uins:new Map([[uid,uin]])})}});
+  await f.select();await f.online();await f.driver.call('get_group_list');const requests=await f.driver.call('get_group_requests');assert.equal(requests.length,1);assert.ok(f.timeline.some(([kind,e])=>kind==='event'&&e.request_type==='group'));
+  const poke=record({elements:[{elementType:8,grayTipElement:{subElementType:17,jsonGrayTipElement:{busiId:'1061',jsonStr:JSON.stringify({items:[{type:'qq',uid},{type:'qq',uid:account.uid}]})}}}]});
+  f.sessions[0].receive([poke,poke]);await waitFor(()=>f.timeline.some(([kind,e])=>kind==='event'&&e.sub_type==='poke'));await nextTurn();assert.equal(f.timeline.filter(([kind,e])=>kind==='event'&&e.sub_type==='poke').length,1);
 });
 
 test('missing QR uid is read from the exact same account in the verified login-list wrapper', async t => {
