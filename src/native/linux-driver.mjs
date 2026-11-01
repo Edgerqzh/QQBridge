@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { createDriverCore, parseAllowedGroups } from './driver-core.mjs';
 import {readSelectedLogin,saveSelectedLogin} from './selected-login.mjs';
+import { requireEncryptedProfile } from './profile-storage.mjs';
 
 /** Production loader for the single verified official Linux QQ native build. */
 export async function createDriver({ emitEvent, emitStatus, requestRestart }) {
@@ -11,6 +12,7 @@ export async function createDriver({ emitEvent, emitStatus, requestRestart }) {
   const appDir = path.resolve(process.env.QQBRIDGE_QQ_APP || 'data/qq/extracted/opt/QQ/resources/app');
   const profile = path.resolve(process.env.QQBRIDGE_QQ_PROFILE || 'data/qq-profile');
   if (profile === path.parse(profile).root) throw new Error('QQBRIDGE_QQ_PROFILE must be a dedicated profile directory.');
+  await requireEncryptedProfile(profile);
   const metadata = JSON.parse(await readFile(path.join(appDir, 'package.json'), 'utf8'));
   if (metadata.version !== '3.2.34-53644' || metadata.platform !== 'linux' || metadata.eleArch !== 'x64' || !metadata.appid?.linux) {
     throw new Error('Experimental native support requires the tested Linux QQ 3.2.34-53644 x64 build.');

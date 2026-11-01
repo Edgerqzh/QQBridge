@@ -1,0 +1,44 @@
+services:
+  qqbridge:
+    image: qqbridge:native
+    build:
+      context: .
+      dockerfile: Dockerfile.native
+    platform: linux/amd64
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 12s
+    environment:
+      QQBRIDGE_HOST: 0.0.0.0
+      QQBRIDGE_PORT: "5700"
+      QQBRIDGE_TOKEN: ${QQBRIDGE_TOKEN:?Set QQBRIDGE_TOKEN to a random access token}
+      QQBRIDGE_BRIDGE_HOST: 127.0.0.1
+      QQBRIDGE_BRIDGE_PORT: "5711"
+      QQBRIDGE_BRIDGE_TOKEN: ${QQBRIDGE_BRIDGE_TOKEN:?Set a separate QQBRIDGE_BRIDGE_TOKEN}
+      QQBRIDGE_QQ_APP: /opt/qq/extracted/opt/QQ/resources/app
+      QQBRIDGE_QQ_PROFILE: /app/data/qq-profile
+      QQBRIDGE_REQUIRE_ENCRYPTED_PROFILE: "1"
+      QQBRIDGE_FORCE_QR: ${QQBRIDGE_FORCE_QR:-0}
+      QQBRIDGE_FFMPEG_PATH: ${QQBRIDGE_FFMPEG_PATH:-ffmpeg}
+      QQBRIDGE_LOGIN_UIN: ${QQBRIDGE_LOGIN_UIN:-}
+      QQBRIDGE_EXPERIMENTAL_RICH_MEDIA: ${QQBRIDGE_EXPERIMENTAL_RICH_MEDIA:-0}
+      QQBRIDGE_ALLOWED_GROUPS: ${QQBRIDGE_ALLOWED_GROUPS:-}
+      QQBRIDGE_ALLOWED_USERS: ${QQBRIDGE_ALLOWED_USERS:-}
+      QQBRIDGE_REVERSE_WS_URL: ${QQBRIDGE_REVERSE_WS_URL:-}
+      QQBRIDGE_REVERSE_WS_TOKEN: ${QQBRIDGE_REVERSE_WS_TOKEN:-}
+    ports:
+      - "127.0.0.1:${QQBRIDGE_API_PORT:-5700}:5700"
+    volumes:
+      - type: bind
+        source: ${QQBRIDGE_BOT_PROFILE:?Mount this bot encrypted profile first}
+        target: /app/data
+        bind:
+          create_host_path: false
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    ulimits:
+      core:
+        soft: 0
+        hard: 0
