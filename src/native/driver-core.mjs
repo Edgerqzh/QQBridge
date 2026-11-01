@@ -83,6 +83,7 @@ export function createDriverCore({
   let rememberedSelection = false, userLoggedInUin = null, sessionStartHandle = null;
   let ignoreQrCancellation = false, qrFailure = null, rememberChoice = false, selectionSaveFailed = false, selectionWrite = Promise.resolve();
   let rememberedRevision = 0, rememberedReads = 0, rememberedBusy = false, rememberedQueued = false, cancelRememberedRead = null;
+  let rememberedCache = { records_observed: 0, selected_present: false, selected_quick_login: false };
   const maxRememberedReads = 8;
   let groupListObserved = false, membership = new Set(), deferredGroups = null;
   const flow = createLoginFlow({
@@ -247,6 +248,8 @@ export function createDriverCore({
         }), cancellation,
       ]));
       if (stopped || current !== generation || selectedAccount || !transportConnected) return;
+      const selected = records.find(item => item?.uin === loginUin);
+      rememberedCache = { records_observed: records.length, selected_present: Boolean(selected), selected_quick_login: selected?.isQuickLogin === true };
       const record = records.find(item => item?.uin === loginUin && item?.isQuickLogin === true && validUid(item.uid));
       if (record) selectAccount(record, true);
       else {
@@ -538,7 +541,7 @@ export function createDriverCore({
         friends:friendActions.status(),private_reads:privateActions.status(),
         group_management:groupManagement.status(),friend_requests:socialActions.status(),
         group_content:groupContent.status(),extended:extendedActions.status(),video:video.status(),
-        remembered_login: { configured: Boolean(loginUin), selected_via_cache: rememberedSelection, lookup_reads: rememberedReads, lookup_pending: rememberedBusy, lookup_limit: maxRememberedReads },
+          remembered_login: { configured: Boolean(loginUin), selected_via_cache: rememberedSelection, lookup_reads: rememberedReads, lookup_pending: rememberedBusy, lookup_limit: maxRememberedReads, ...rememberedCache },
       };
       if(GROUP_MANAGEMENT_ACTIONS.includes(action))return groupManagement.call(action,params);
       if(SOCIAL_ACTIONS.includes(action))return socialActions.call(action,params);

@@ -1,0 +1,6 @@
+FROM debian:bookworm-slim
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends gocryptfs fuse3 util-linux \
+    && rm -rf /var/lib/apt/lists/*
+COPY scripts/run-encrypted-storage.sh /usr/local/bin/run-encrypted-storage
+ENTRYPOINT ["sh", "/usr/local/bin/run-encrypted-storage"]

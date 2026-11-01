@@ -1,0 +1,91 @@
+services:
+  qqbridge:
+    depends_on:
+      storage:
+        condition: service_healthy
+    image: qqbridge:native
+    build:
+      context: .
+      dockerfile: Dockerfile.native
+    platform: linux/amd64
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 12s
+    environment:
+      QQBRIDGE_HOST: 0.0.0.0
+      QQBRIDGE_PORT: "5700"
+      QQBRIDGE_TOKEN: ${QQBRIDGE_TOKEN:?Set QQBRIDGE_TOKEN to a random access token}
+      QQBRIDGE_BRIDGE_HOST: 127.0.0.1
+      QQBRIDGE_BRIDGE_PORT: "5711"
+      QQBRIDGE_BRIDGE_TOKEN: ${QQBRIDGE_BRIDGE_TOKEN:?Set a separate QQBRIDGE_BRIDGE_TOKEN}
+      QQBRIDGE_QQ_APP: /opt/qq/extracted/opt/QQ/resources/app
+      QQBRIDGE_QQ_PROFILE: /app/data/qq-profile
+      QQBRIDGE_REQUIRE_ENCRYPTED_PROFILE: "1"
+      QQBRIDGE_FORCE_QR: ${QQBRIDGE_FORCE_QR:-0}
+      QQBRIDGE_FFMPEG_PATH: ${QQBRIDGE_FFMPEG_PATH:-ffmpeg}
+      QQBRIDGE_LOGIN_UIN: ${QQBRIDGE_LOGIN_UIN:-}
+      QQBRIDGE_EXPERIMENTAL_RICH_MEDIA: ${QQBRIDGE_EXPERIMENTAL_RICH_MEDIA:-0}
+      QQBRIDGE_ALLOWED_GROUPS: ${QQBRIDGE_ALLOWED_GROUPS:-}
+      QQBRIDGE_ALLOWED_USERS: ${QQBRIDGE_ALLOWED_USERS:-}
+      QQBRIDGE_REVERSE_WS_URL: ${QQBRIDGE_REVERSE_WS_URL:-}
+      QQBRIDGE_REVERSE_WS_TOKEN: ${QQBRIDGE_REVERSE_WS_TOKEN:-}
+    ports:
+      - "127.0.0.1:${QQBRIDGE_API_PORT:-5700}:5700"
+    volumes:
+      - type: bind
+        source: /mnt/qqbridge-encrypted/${QQBRIDGE_BOT_ID:?Set a unique bot ID}
+        target: /app/data
+        bind:
+          create_host_path: false
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    ulimits:
+      core:
+        soft: 0
+        hard: 0
+
+  storage:
+    image: qqbridge:encrypted-storage
+    build:
+      context: .
+      dockerfile: Dockerfile.storage
+    restart: unless-stopped
+    stop_grace_period: 15s
+    devices:
+      - /dev/fuse:/dev/fuse
+    cap_drop:
+      - ALL
+    cap_add:
+      - SYS_ADMIN
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETUID
+      - SETGID
+    security_opt:
+      - apparmor=unconfined
+    secrets:
+      - profile-key
+    volumes:
+      - encrypted-data:/cipher
+      - type: bind
+        source: /mnt/qqbridge-encrypted/${QQBRIDGE_BOT_ID:?Set a unique bot ID}
+        target: /mount
+        bind:
+          propagation: rshared
+          create_host_path: false
+    healthcheck:
+      test: ["CMD-SHELL", "test \"$$(findmnt -rn -o FSTYPE --target /mount | tail -n 1)\" = fuse.gocryptfs"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+      start_period: 5s
+
+volumes:
+  encrypted-data:
+
+secrets:
+  profile-key:
+    file: ${QQBRIDGE_STORAGE_KEY_FILE:?Provide a private existing key file}

@@ -51,6 +51,40 @@ sudo bash scripts/bot-storage.sh destroy bot-a bot-a
 
 停止原容器后，先备份原完整资料和环境秘密；初始化并挂载新加密目录，再将原 `/app/data` 的内容完整复制到该挂载点，保留权限和设备标识。切换至加密 Compose 后，验证 `get_login_state`、账号身份和旧消息 ID，再处理旧明文卷及其备份。仅复制 `selected-account.json` 无法恢复登录。不要在线复制原生数据库；不要把旧明文卷误挂到新机器人的目录。
 
-本机当前 Docker 未运行，因此本次没有迁移现有账号卷，也没有验证真实 FUSE 挂载、加密卷上的 QQ 重启登录。自动化覆盖 mountinfo 检查与拒绝回退；实际宿主机部署需要额外验证挂载、重启、错误密钥和删除流程。既有同 profile 快速登录已有真实验证记录，但不等于此次加密部署验证。
+## Docker Desktop / 独立存储容器
+
+`compose.storage.yaml` 将 FUSE 放在独立存储容器，QQBridge 容器继续使用非 root、`cap_drop: ALL`、`no-new-privileges`。只有存储容器可以访问密钥与加密资料卷，并拥有 FUSE 挂载、UID/GID 切换所需权限。它不是 `--privileged` 容器，但其 `SYS_ADMIN` 权限仍属于受信任的宿主机存储组件。不要将其接口开放给机器人用户。
+
+先为每个机器人准备独立随机密钥文件并限制访问权限，设置 `QQBRIDGE_BOT_ID`、`QQBRIDGE_STORAGE_KEY_FILE` 和独立 API 端口。Linux Docker 宿主机执行：
+
+```bash
+sudo sh scripts/prepare-storage-host.sh bot-a
+export QQBRIDGE_BOT_ID=bot-a
+export QQBRIDGE_STORAGE_KEY_FILE=/secure/bot-a.key
+export QQBRIDGE_API_PORT=5700
+docker compose --env-file /secure/bot-a.env -p qqbridge-bot-a -f compose.storage.yaml up -d --build --wait storage
+docker compose --env-file /secure/bot-a.env -p qqbridge-bot-a -f compose.storage.yaml up -d --build qqbridge
+```
+
+宿主机目录 `/mnt/qqbridge-encrypted/<机器人 ID>` 仅是解密挂载点，持久化密文保存在该 Compose project 的 `encrypted-data` named volume。密钥作为只读 secret 文件提供给存储容器；不要把密钥文件放进该卷、源码或镜像。
+
+Windows Docker Desktop 使用 PowerShell 7 启动工具，它会启动 Docker、准备 Docker Desktop Linux 主机的共享挂载，再按顺序启动存储与应用：
+
+```powershell
+pwsh -File scripts/start-encrypted-desktop.ps1 -BotId bot-a -EnvFile C:/secure/bot-a.env -KeyFile C:/secure/bot-a.key -ApiPort 5700
+```
+
+该工具会停止同一 Compose project 的现有服务后重新启动，不能与该机器人的其他生命周期操作同时执行。它不会自动注册开机任务。宿主机或 Docker 完整重启后，应由后端再次调用此工具；仅设置容器 restart policy 无法保证宿主机共享挂载和服务启动顺序。应用挂载点需要在加密存储就绪后重新绑定，不应在运行中的应用下直接重建 FUSE 挂载。
+
+已有资料迁入存储容器时，先只启动 `storage`，将停止状态的原 `/app/data` 完整复制到宿主机解密挂载点，校验内容、所有权及权限，再启动 `qqbridge`。不要把原明文卷挂为 `/cipher`。删除时先 `down`，再按项目名称核对并删除对应密文卷、secret 文件及业务资料；日常重启不要执行 `down -v`。
+
+## 2026-11-01 实机验证
+
+- Docker Desktop / Linux FUSE 挂载成功，非 root QQBridge 的加密文件系统检查通过。
+- 停止原服务后迁移 2,358 个文件、229,222,691 字节，逐文件内容、符号链接、所有权及权限校验一致；原明文资料卷保留作回滚。
+- 迁移前原账号已不允许快速登录，迁移后缓存许可一致。用户在加密卷上重新扫码并勾选记住登录后，完成以下两轮恢复，均为同一账号、`online: true`、`selected_via_cache: true`、`scan_confirmed: false`：仅重启 QQBridge；停止 QQBridge、重新挂载存储后再启动 QQBridge。
+- 只读回归确认旧消息 ID、3 条合并转发子消息、媒体标识及 4 条既有发送别名保留。未发送聊天消息。
+- 独立 Compose 测试卷通过非 root 读写及密文视图检查：文件名与测试正文没有以明文出现在原始密文卷。错误密钥被 gocryptfs 拒绝，未挂载资料目录被 QQBridge 拒绝。
+- Linux 自动化 255 项通过；Windows 253 项通过、2 项因缺少媒体工具跳过。尚未验证 Windows 整机重启或注册开机任务；删除真实账号的资料未执行。
 
 gocryptfs 提供文件内容与文件名加密，挂载时应用仍可访问明文；宿主机管理员可访问运行中的解密视图。参考 [gocryptfs 官方手册](https://github.com/rfjakob/gocryptfs/blob/master/Documentation/MANPAGE.md)。

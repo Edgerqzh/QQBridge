@@ -271,9 +271,13 @@ test('remembered login uses only the explicitly requested eligible account and d
   assert.equal(f.sessions.length, 1);
   const state = await f.driver.call('get_login_state');
   assert.equal(state.scan_confirmed, false); assert.equal(state.account_selected, true);
+  assert.equal(state.remembered_login.records_observed, 2);
+  assert.equal(state.remembered_login.selected_present, true);
+  assert.equal(state.remembered_login.selected_quick_login, true);
   const missing = await fixture(t, { loginUin: '555555555' });
   assert.equal(missing.calls.filter(item => item[0] === 'quick-login').length, 0);
   assert.equal((await missing.driver.call('get_login_state')).stage, 'remembered_account_waiting');
+  assert.equal((await missing.driver.call('get_login_state')).remembered_login.selected_present, false);
   const defaultLogin = await fixture(t);
   assert.equal(defaultLogin.calls.filter(item => item[0] === 'login-list').length, 0);
 });
