@@ -61,6 +61,7 @@ export function createDriverCore({
   allowedGroups, allowedUsers, loginUin = '', experimentalRichMedia = false, createSession = createLinuxSession, createIndex = createMessageIndex, persistSelectedAccount = async () => {},
   connectionTimeoutMs = 10000, qrTimeoutMs = 12000, accountTimeoutMs = 12000, sendTimeoutMs = 12000,
   requestRestart = () => {}, recoveryGraceMs = 15000, forceQr = false, manualRecoveryReason = '',
+  platformConfig = { type: 3, appId: metadata?.appid?.linux, qua: 'V1_LNX_NQ_3.2.34_53644_GW_B', osName: 'Linux' },
 }) {
   if (typeof prepareProfile !== 'function') throw new TypeError('prepareProfile is required.');
   if (loginUin !== '' && !validUin(loginUin)) throw new TypeError('QQBRIDGE_LOGIN_UIN must be an explicit valid QQ account number.');
@@ -84,6 +85,13 @@ export function createDriverCore({
   let ignoreQrCancellation = false, qrFailure = null, rememberChoice = false, selectionSaveFailed = false, selectionWrite = Promise.resolve();
   let rememberedRevision = 0, rememberedReads = 0, rememberedBusy = false, rememberedQueued = false, cancelRememberedRead = null;
   let rememberedCache = { records_observed: 0, selected_present: false, selected_quick_login: false };
+  const globalDependencyCalls = new Set();
+  const loginEventNames = new Set();
+  let qrConsumed = false;
+  function canAbortQrPolling() {
+    if (platformConfig.abortPollingAfterLogin !== false) return true;
+    return !qrConsumed && Boolean(qrPending || qr && qr.expires_at * 1000 > Date.now());
+  }
   const maxRememberedReads = 8;
   let groupListObserved = false, membership = new Set(), deferredGroups = null;
   const flow = createLoginFlow({
@@ -189,6 +197,7 @@ export function createDriverCore({
     if (selectedAccount?.uin !== account.uin) { generation++; mapper = null; groupListObserved = false; membership.clear(); deferredGroups = null; }
     selectedAccount = selectedAccount?.uin === account.uin ? { ...selectedAccount, ...account } : account;
     rememberedSelection = remembered;
+    qrConsumed = true;
     if (!remembered && rememberChoice) selectionWrite = selectionWrite.catch(()=>{}).then(()=>persistSelectedAccount(account.uin)).catch(()=>{selectionSaveFailed=true;notify();});
     loginFailed = false; qr = null;
     if (nativeRestored) flow.onNativeAccountRestored(selectedAccount);
@@ -347,7 +356,7 @@ export function createDriverCore({
         }
       }
       session = createSession({
-        native, engine, account, profile, metadata, machineId,
+        native, engine, account, profile, metadata, machineId, platformConfig,
         getAuthenticationEvidence() {
           if (!isCurrent() || !transportConnected || loginFailed) return false;
           const state = flow.snapshot();
@@ -494,6 +503,7 @@ export function createDriverCore({
     return (...args) => {
       if (stopped) return;
       lastEvent = key;
+      if (loginEventNames.size < 64) loginEventNames.add(key);
       try { handlers[key]?.(...args); }
       catch { loginFailed = true; stage = 'callback_error'; rejectPending(failure('QQ native login callback failed.')); notify(); }
     };
@@ -513,12 +523,12 @@ export function createDriverCore({
     if (stopped) throw failure('QQ native driver is stopped.');
     engine = native.NodeIQQNTWrapperEngine.get();
     engine.initWithDeskTopConfig({
-      platform_type: 3, app_type: 1, app_version: metadata.version, os_version: os.release(),
+      platform_type: platformConfig.type, app_type: 1, app_version: metadata.version, os_version: os.release(),
       global_path_config: { desktopGlobalPath: profile + '/', mobileGlobalDBPath: path.join(profile, 'db') + '/', mobileGlobalDataPath: profile + '/', mobileGlobalTempPath: path.join(profile, 'tmp') + '/', base_path_prefix: profile + '/' },
-      thumb_config: { maxSide: 1280, minSide: 720, longLimit: 4096, density: 1 }, use_xlog: false, qua: 'V1_LNX_NQ_3.2.34_53644_GW_B', enableEnvConfig: false,
-    }, new Proxy({}, { get: (_target, key) => typeof key === 'string' ? () => {} : undefined }));
+      thumb_config: { maxSide: 1280, minSide: 720, longLimit: 4096, density: 1 }, use_xlog: false, qua: platformConfig.qua, enableEnvConfig: false,
+    }, new Proxy({}, { get: (_target, key) => typeof key === 'string' ? () => { if (globalDependencyCalls.size < 32) globalDependencyCalls.add(key); } : undefined }));
     login = native.NodeIKernelLoginService.get();
-    login.initConfig({ commonPath: profile + '/', clientVer: metadata.version, machineId, platVer: os.release(), hostName: 'qqbridge', appid: String(metadata.appid.linux), externalVersion: 0 });
+    login.initConfig({ commonPath: profile + '/', clientVer: metadata.version, machineId, platVer: os.release(), hostName: 'qqbridge', appid: String(platformConfig.appId), externalVersion: 0 });
     login.addKernelLoginListener(listener); stage = 'connecting'; notify();
     if (login.connect() === false) throw failure('QQ native login transport refused to connect.');
   }
@@ -536,6 +546,8 @@ export function createDriverCore({
       if (action === 'get_login_state') return {
         ...account, ...status(), session: sessionState(), last_event: lastEvent, qq_version: metadata.version,
         qr_failure: qrFailure, saved_selection_error: selectionSaveFailed, media_downloads: receivedMedia.status(), audio: audio.status(),
+        global_dependency_names: [...globalDependencyCalls],
+        login_event_names: [...loginEventNames],
         message_index: messageIndex?.status() ?? null, context_reads: contextActions.status(),
         notices: noticeMapper?.status() ?? null, recovery: { ...recovery.status(), manual_reason: manualRecoveryReason || null },
         friends:friendActions.status(),private_reads:privateActions.status(),
@@ -666,18 +678,19 @@ export function createDriverCore({
       // Another waiter can synchronously receive/cache a QR while we yield.
       if (qr && (params.refresh !== true || qrRevision !== requestedRevision) && qr.expires_at * 1000 > Date.now() + 10000) return { ...qr, expires_in: Math.max(0, qr.expires_at - Math.floor(Date.now() / 1000)) };
       if (qrPending) return qrPending.promise;
+      const abortPrevious = qrRevision > 0 && canAbortQrPolling();
       let resolve, reject;
       const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
       const timer = setTimeout(() => { qrPending = null; reject(failure('QQ did not return a QR image in time.')); }, qrTimeoutMs);
       qrPending = { promise, resolve: value => { clearTimeout(timer); resolve(value); }, reject: error => { clearTimeout(timer); reject(error); } };
-      try { if (params.remember_login !== undefined) { login.setRemerberPwd(params.remember_login); login.setAutoLogin(params.remember_login); } qr = null; if (qrRevision > 0) { ignoreQrCancellation = true; login.abortPolling(); } if (login.getQRCodePicture() === false) throw failure('QQ native module rejected the QR request.'); }
+      try { if (params.remember_login !== undefined) { login.setRemerberPwd(params.remember_login); login.setAutoLogin(params.remember_login); } qr = null; if (abortPrevious) { ignoreQrCancellation = true; login.abortPolling(); } if (login.getQRCodePicture() === false) throw failure('QQ native module rejected the QR request.'); }
       catch { qrPending?.reject(failure('QQ native module rejected the QR request.')); qrPending = null; }
       return promise;
     },
     stop() {
       if (stopPromise) return stopPromise;
       stopped = true; transportConnected = false; stage = 'stopped'; generation++;
-      recovery.stop(); noticeMapper?.close(); friendActions.close(); privateActions.close(); groupManagement.close();socialActions.close();groupContent.close();extendedActions.close();video.close();flow.stop(); accountActions.close(); contextActions.close(); audio.close(); cancelRememberedRead?.(); rejectPending(failure('QQ native driver stopped.'));
+      recovery.stop(); mediaStore.close(); noticeMapper?.close(); friendActions.close(); privateActions.close(); groupManagement.close();socialActions.close();groupContent.close();extendedActions.close();video.close();flow.stop(); accountActions.close(); contextActions.close(); audio.close(); cancelRememberedRead?.(); rejectPending(failure('QQ native driver stopped.'));
       clearImmediate(sessionStartHandle); sessionStartHandle = null;
       stopPromise = (async () => {
         try { await selectionWrite; } catch {}
@@ -685,7 +698,7 @@ export function createDriverCore({
         try { await receivedMedia.flush(); } catch {}
         receivedMedia.clear();
         try { await session?.stop(); } catch {}
-        try { login?.abortPolling(); } catch {}
+        try { if (canAbortQrPolling()) login?.abortPolling(); } catch {}
         try { login?.removeKernelLoginListener(listener); } catch {}
         membership.clear(); receivedMedia.clear(); selectedAccount = null; mapper = null; qr = null; notify();
       })();

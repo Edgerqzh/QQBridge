@@ -65,6 +65,21 @@ async function fixture(t, overrides = {}) {
   return { core, order, state, account, forwarded, observed, session, msgService, groupService };
 }
 
+test('Windows session configuration keeps the same verified authentication gate', async t => {
+  let authenticated = false;
+  const f = await fixture(t, { options: {
+    metadata: { version: '9.9.36-53644', platform: 'win32' },
+    platformConfig: { type: 1, appId: '537391474', osName: 'Windows' },
+    getAuthenticationEvidence: () => authenticated,
+  } });
+  await f.core.start(); f.state.depends.onMSFStatusChange(1,0);
+  assert.equal(f.state.config.platform, 1);
+  assert.equal(f.state.config.appid, '537391474');
+  assert.equal(f.state.config.rdeliveryConfig.osVersion, 'Windows');
+  assert.equal(f.core.status().online, false);
+  authenticated = true; assert.equal(f.core.status().online, true);
+});
+
 test('native recall updates are forwarded separately and cannot invent online evidence', async t => {
   const updates=[];const f=await fixture(t,{options:{onMessageUpdate:r=>updates.push(r)}});await f.core.start();
   f.state.msgListener.onMsgInfoListUpdate([{recallTime:'1800000000'}]);

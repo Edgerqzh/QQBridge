@@ -84,6 +84,7 @@ async function fixture(t, options = {}) {
     createIndex: options.createIndex ?? (() => ({ load: async () => undefined, changed() {}, flush: async () => {}, status: () => ({ dirty: false, failed: false }) })),
     connectionTimeoutMs: 80, qrTimeoutMs: 80, accountTimeoutMs: 80, sendTimeoutMs: options.sendTimeoutMs ?? 80,
     requestRestart: options.requestRestart, recoveryGraceMs: options.recoveryGraceMs, forceQr: options.forceQr,
+    platformConfig: options.platformConfig,
     createSession(value) {
       calls.push(['create-session', value.account]); sessionOptions = value;
       const state = { session_ready: false, online: false, good: false };
@@ -695,4 +696,23 @@ test('unsolicited native auto-restore cannot select another account',async t=>{
   const f=await fixture(t,{loginUin:account.uin,loginList:{result:0,LocalLoginInfoList:[]}});
   f.listener().onQRCodeLoginSucceed({...account,uin:'987654321'});await nextTurn();
   assert.equal(f.sessions.length,0);assert.equal(f.driver.status().online,false);assert.equal(f.driver.status().stage,'callback_error');
+});
+
+
+test('Windows shutdown does not abort a QR session already consumed by account login', async t => {
+  const platformConfig = { type: 1, appId: '537391474', qua: 'fixture', osName: 'Windows', abortPollingAfterLogin: false };
+  const selected = await fixture(t, { platformConfig });
+  await selected.select(); await selected.online(); await selected.driver.stop();
+  assert.equal(selected.calls.filter(x => x[0] === 'abort-polling').length, 0);
+  const waiting = await fixture(t, { platformConfig });
+  await waiting.driver.call('get_login_qrcode'); await waiting.driver.stop();
+  assert.equal(waiting.calls.filter(x => x[0] === 'abort-polling').length, 1);
+  const fresh = await fixture(t, { platformConfig });
+  await fresh.driver.stop();
+  assert.equal(fresh.calls.filter(x => x[0] === 'abort-polling').length, 0);
+  const consumed = await fixture(t, { platformConfig, autoUser: false });
+  await consumed.driver.call('get_login_qrcode'); await consumed.select();
+  assert.equal(consumed.sessions.length, 0);
+  await consumed.driver.stop();
+  assert.equal(consumed.calls.filter(x => x[0] === 'abort-polling').length, 0);
 });

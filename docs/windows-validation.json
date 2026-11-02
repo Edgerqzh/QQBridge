@@ -1,0 +1,38 @@
+{
+  "version": "0.10.0-dev.1",
+  "qualification": "development-validation-in-progress",
+  "host_integration": {
+    "source_build_passed": true,
+    "packaged_executable_passed": true,
+    "native_worker_restart": true,
+    "duplicate_profile_rejected_without_disturbing_owner": true,
+    "parent_exit_cleans_all_children": true,
+    "ports_released": true,
+    "gateway_failure_cleans_all_children": true,
+    "no_main_windows": true,
+    "uses_real_qq": false,
+    "command": "pwsh -File scripts/test-windows-host.ps1"
+  },
+  "real_packaged_session": {
+    "native_worker_termination_recovers_same_account_without_scan": true,
+    "gateway_and_login_web_remain_running_during_recovery": true,
+    "parent_termination_stops_all_three_children": true,
+    "all_three_ports_released": true,
+    "restart_recovers_same_account_without_scan": true,
+    "previous_message_id_remains_queryable": true,
+    "user_confirmed_main_qq_remains_online": true,
+    "social_sends_during_recovery_tests": 0
+  },
+  "automated_regression": {
+    "windows": { "tests": 259, "passed": 257, "skipped": 2, "failed": 0, "skipped_reason": "FFmpeg / ffprobe unavailable" },
+    "previous_linux_run": { "tests": 259, "passed": 259, "skipped": 0, "failed": 0 }
+  },
+  "pending": [
+    "Windows operating-system reboot with remembered login",
+    "24-hour observation and real five-minute network outage",
+    "clean Windows 10 and 11 environments",
+    "two logged-in robot accounts",
+    "sleep and wake",
+    "Defender scan"
+  ]
+}

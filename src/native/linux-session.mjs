@@ -63,6 +63,7 @@ export function createLinuxSession({
   native, engine, account, profile, metadata, machineId,
   onState = () => {}, onMessage, onMessageUpdate, onGroupList, onFriendList, onFriendRequests, onGroupRequests, onGroupBulletin, onAuthenticationRequired, onUnsupportedDependency = () => {},
   forwardDispatcher, initTimeoutMs = 20000, getAuthenticationEvidence = () => false, getAuthenticationEvidenceType = () => 'native_login_result',
+  platformConfig = { type: 3, appId: metadata?.appid?.linux, osName: 'Linux' },
 }) {
   if (typeof account?.uin !== 'string' || !/^\d{5,12}$/.test(account.uin) ||
       typeof account.uid !== 'string' || !account.uid || account.uid.length > 128) {
@@ -71,8 +72,9 @@ export function createLinuxSession({
   if (typeof profile !== 'string' || !path.isAbsolute(profile) || path.resolve(profile) === path.parse(profile).root) {
     throw fail('A dedicated absolute QQ profile directory is required.');
   }
-  if (metadata?.version !== '3.2.34-53644' || typeof metadata?.appid?.linux !== 'string' || !metadata.appid.linux) {
-    throw fail('The tested official Linux QQ build metadata is required.');
+  const supportedBuild = platformConfig.type === 3 && metadata?.version === '3.2.34-53644' || platformConfig.type === 1 && metadata?.version === '9.9.36-53644' && metadata?.platform === 'win32';
+  if (!supportedBuild || typeof platformConfig.appId !== 'string' || !platformConfig.appId) {
+    throw fail('The tested official QQ build metadata is required.');
   }
   if (typeof machineId !== 'string' || !machineId || machineId.length > 256) throw fail('The existing profile machine ID is required.');
   if (!Number.isInteger(initTimeoutMs) || initTimeoutMs < 1) throw new Error('Invalid session initialization timeout.');
@@ -258,7 +260,10 @@ export function createLinuxSession({
       notify(); observer(onMessage, raw);
     }, onMsgInfoListUpdate: raw => {
       if (!stopped && Array.isArray(raw)) observer(onMessageUpdate, raw);
-    }, onKickedOffLine: () => authenticationRequired('kicked_offline') });
+    }, onKickedOffLine: (...args) => {
+      try { platformConfig.onAuthenticationEvent?.('kicked_offline', args, account); } catch {}
+      authenticationRequired('kicked_offline');
+    } });
     msgService.addKernelMsgListener(msgListener); state.message_listener_attached = true;
     if (typeof onGroupList === 'function') {
       groupListener = notificationAdapter({ onGroupListUpdate: updateGroups,onGroupNotifiesUpdated:(doubt,rows)=>{if(!stopped)observer(onGroupRequests,doubt,rows);},onGroupBulletinChange:(group,rows)=>{if(!stopped)observer(onGroupBulletin,group,rows);} });
@@ -304,11 +309,11 @@ export function createLinuxSession({
     const config = {
       selfUin: account.uin, selfUid: account.uid, sysPath: root + path.sep, userPath: folder('account'),
       gproDBName: 'gpro', clientVer: metadata.version, a2: '', d2: '', d2Key: '', machineId,
-      platform: 3, deviceType: 1, platVer: os.release(),
-      rdeliveryConfig: { appKey: '', systemId: 0, appId: metadata.appid.linux, logicEnvironment: '', platform: 3, language: 'zh', sdkVersion: '', userId: account.uin, appVersion: metadata.version, osVersion: 'Linux', bundleId: 'com.tencent.qq', serverUrl: '', fixedAfterHitKeys: [] },
+      platform: platformConfig.type, deviceType: 1, platVer: os.release(),
+      rdeliveryConfig: { appKey: '', systemId: 0, appId: platformConfig.appId, logicEnvironment: '', platform: platformConfig.type, language: 'zh', sdkVersion: '', userId: account.uin, appVersion: metadata.version, osVersion: platformConfig.osName, bundleId: 'com.tencent.qq', serverUrl: '', fixedAfterHitKeys: [] },
       defaultFileDownloadPath: folder('downloads'), extDataPath: folder('ext'), desktopPathConfig: { account_path: folder('account') },
       mobilePathConfig: Object.fromEntries(mobileFolders.map(key => [key, folder('mobile')])),
-      appid: metadata.appid.linux, deviceInfo: engine.getDeviceInfo(), deviceConfig: '', useNewVerBuddyData: false,
+      appid: platformConfig.appId, deviceInfo: engine.getDeviceInfo(), deviceConfig: '', useNewVerBuddyData: false,
     };
     engine.readyToShow();
     state.stage = 'initializing'; notify();

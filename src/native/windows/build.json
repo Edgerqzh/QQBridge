@@ -1,0 +1,11 @@
+{
+  "qq_version": "9.9.36-53644",
+  "node_version": "24.21.0",
+  "login_app_id": "537391474",
+  "wrapper_sha256": "0d8b94448f4dafe7337b88d6a568b004224c37fcbe2bd1142c1af7624fbd534c",
+  "qq_installer_url": "https://qqdl.gtimg.cn/qqfile/QQNTV2/9.9.36/release/e8e54bbb/QQ_9.9.36_260924_x64_01.exe",
+  "qq_installer_sha256": "63255c70c7ff523e7eed7d52d9708ed7a77ea346ece6474c65dded406edb3155",
+  "node_url": "https://nodejs.org/dist/v24.21.0/win-x64/node.exe",
+  "node_sha256": "ba4e6d110e8c1592a1ecd390f6b05f3da124b13871a5be62b341a07a853c6c32",
+  "node_license_sha256": "5888dbb9a1d2b18f2c3e6c5f6af1b39de658372b402a0577b002777f14c62ace"
+}
