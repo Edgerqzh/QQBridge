@@ -2,6 +2,8 @@
 
 当前 Windows 适配处于开发验收阶段，目标平台为 Windows 10 / 11 x64，不依赖 Docker 或 WSL。它与 Linux 版使用同一网关、OneBot 接口、登录接口和业务逻辑，另行提供 Windows 原生模块加载及进程托管。
 
+下载：[v0.10.0 Release](https://github.com/Edgerqzh/QQBridge/releases/tag/v0.10.0)。Windows 文件名为 `qqbridge-windows-x64-0.10.0.zip`，摘要见同页 `SHA256SUMS.txt`。项目 MIT 许可证、Node 和 npm 依赖的许可及图像库通知均随包保留；也提供独立许可证包。发布版本不代表下列待验收项目已经通过。
+
 ## 固定依赖
 
 - 官方 Windows QQ `9.9.36-53644` x64。使用腾讯官方下载包，已验证腾讯数字签名；安装包 SHA-256 固定于 [构建清单](../src/native/windows/build.json)。该摘要由已验证的下载包计算，不声称腾讯另行公布了此摘要。
