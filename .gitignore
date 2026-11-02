@@ -13,3 +13,5 @@ data/
 *.rpm
 *.dmp
 coverage/
+Registry20
+machine-info

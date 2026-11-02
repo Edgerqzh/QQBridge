@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, writeFile, realpath } from 'node:fs/promises';
 import path from 'node:path';
+import { createImageWorker } from './image-worker-client.mjs';
 
 const fail = message => Object.assign(new Error(message), { retcode: 1400 });
 function crc32(bytes) {
@@ -42,8 +43,10 @@ export function imageInfo(bytes) {
   throw fail('Only PNG and JPEG images with readable dimensions are supported.');
 }
 export function createMediaStore({ directory, maxBytes = 16 * 1024 * 1024, convertAudio }) {
+  const windowsImages = process.platform === 'win32' ? createImageWorker() : null;
   const root = path.resolve(directory);
   return {
+    close() { windowsImages?.close(); },
     async prepare(file, kind, name) {
       if (typeof file !== 'string') throw fail('Media file must be base64:// data or a managed media identifier.');
       await mkdir(root, { recursive: true, mode: 0o700 });
@@ -84,11 +87,12 @@ export function createMediaStore({ directory, maxBytes = 16 * 1024 * 1024, conve
       catch (error) { if (error.code !== 'EEXIST') throw error; }
       const thumbPaths = new Map(); let thumbSize = 0;
       if (kind === 'image') {
-        const { default: sharp } = await import('sharp');
+        const generated = windowsImages ? await windowsImages.prepare(bytes) : null;
+        const sharp = generated ? null : (await import('sharp')).default;
         for (const side of [198, 720]) {
           let thumbnail;
           try {
-            thumbnail = await sharp(bytes, { limitInputPixels: 40000000, failOn: 'error' })
+            thumbnail = generated ? generated.get(side) : await sharp(bytes, { limitInputPixels: 40000000, failOn: 'error' })
               .resize({ width: side, height: side, fit: 'inside', withoutEnlargement: true })
               .jpeg({ quality: 80 }).toBuffer();
           } catch { throw fail('Image decoding or thumbnail generation failed.'); }

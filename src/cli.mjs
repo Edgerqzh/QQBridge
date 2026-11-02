@@ -3,6 +3,7 @@ import { collectDiagnostics } from './doctor.mjs';
 import { BridgeBackend } from './bridge-backend.mjs';
 import { createGateway } from './gateway.mjs';
 import { createReverseWebSocket } from './reverse-ws.mjs';
+import { readFile } from 'node:fs/promises';
 
 async function main() {
   const command = process.argv[2] || 'start';
@@ -18,7 +19,8 @@ async function main() {
   if (command !== 'start') throw new Error('Usage: node src/cli.mjs start|init|doctor');
   const config = readConfig();
   const backend = new BridgeBackend({ token: config.bridgeToken, host: config.bridgeHost, port: config.bridgePort });
-  const gateway = createGateway({ backend, token: config.token, host: config.host, port: config.port, appVersion: '0.3.0-dev.1' });
+  const version = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8')).version;
+  const gateway = createGateway({ backend, token: config.token, host: config.host, port: config.port, appVersion: version });
   const reverse = config.reverseUrl ? createReverseWebSocket({ backend, url: config.reverseUrl, token: config.reverseToken }) : null;
   try {
     await backend.start(); await gateway.start(); await reverse?.start();
