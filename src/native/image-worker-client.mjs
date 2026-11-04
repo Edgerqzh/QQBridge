@@ -8,7 +8,9 @@ export function createImageWorker({ timeoutMs = 8000, maxJobs = 2 } = {}) {
   const children = new Set();
   let closed = false;
   return {
-    prepare(bytes) {
+    inspect(bytes) { return this.prepare(bytes, 'inspect'); },
+    prepare(bytes, mode = 'thumbnails') {
+      if (!['thumbnails', 'inspect'].includes(mode)) return Promise.reject(fail());
       if (!Buffer.isBuffer(bytes) || !bytes.length || bytes.length > 16 * 1024 * 1024) return Promise.reject(fail());
       if (closed || children.size >= maxJobs) return Promise.reject(fail());
       const env = { ...process.env };
@@ -43,6 +45,11 @@ export function createImageWorker({ timeoutMs = 8000, maxJobs = 2 } = {}) {
           if (closed || code !== 0) return finish(fail());
           try {
             const data = JSON.parse(Buffer.concat(output).toString('utf8'));
+            if (mode === 'inspect') {
+              if (!['png', 'jpeg'].includes(data.format) || !Number.isInteger(data.width) || !Number.isInteger(data.height) ||
+                  data.width < 1 || data.height < 1 || data.width > 4096 || data.height > 4096) throw new Error();
+              return finish(null, { format: data.format, width: data.width, height: data.height });
+            }
             const result = new Map();
             for (const side of [198,720]) {
               if (typeof data[side] !== 'string' || data[side].length > 2 * 1024 * 1024) throw new Error();
@@ -53,7 +60,7 @@ export function createImageWorker({ timeoutMs = 8000, maxJobs = 2 } = {}) {
             finish(null,result);
           } catch { finish(fail()); }
         });
-        child.stdin.end(JSON.stringify({ data: bytes.toString('base64') }));
+        child.stdin.end(JSON.stringify({ data: bytes.toString('base64'), mode }));
       });
     },
     status: () => ({ active: children.size, limit: maxJobs, closed }),

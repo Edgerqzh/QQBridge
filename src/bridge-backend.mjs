@@ -2,6 +2,7 @@ import { EventEmitter } from 'node:events';
 import { createServer } from 'node:http';
 import { timingSafeEqual, randomUUID } from 'node:crypto';
 import { WebSocketServer, WebSocket } from 'ws';
+import { isAccountCapability } from './account-capabilities.mjs';
 
 function error(message, retcode = 1503) { return Object.assign(new Error(message), { retcode }); }
 function authorized(header, token) {
@@ -81,7 +82,7 @@ export class BridgeBackend extends EventEmitter {
       clearTimeout(handshake);
       if (this.peer !== peer) return;
       this.peer = null; this.actions.clear(); this.updateStatus({});
-      for (const { reject, timer } of this.pending.values()) { clearTimeout(timer); reject(error('Native runtime disconnected; delivery may be unknown. Do not automatically resend.')); }
+      for (const { reject, timer, action } of this.pending.values()) { clearTimeout(timer); reject(isAccountCapability(action) ? error('原生连接中断，操作结果未确认，请勿盲目重试', 1500) : error('Native runtime disconnected; delivery may be unknown. Do not automatically resend.')); }
       this.pending.clear();
     });
   }
@@ -94,12 +95,13 @@ export class BridgeBackend extends EventEmitter {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
-        reject(error('Native action timed out; delivery may be unknown. Do not automatically resend.', 1504));
+        reject(isAccountCapability(action) ? error('原生请求超时，操作结果未确认，请勿盲目重试', 1500) : error('Native action timed out; delivery may be unknown. Do not automatically resend.', 1504));
       }, this.callTimeoutMs);
-      this.pending.set(id, { resolve, reject, timer });
+      this.pending.set(id, { resolve, reject, timer, action });
       this.peer.ws.send(JSON.stringify({ type: 'call', id, action, params }), (err) => {
         if (!err) return;
-        clearTimeout(timer); this.pending.delete(id); reject(error('Failed to send native action'));
+        clearTimeout(timer); this.pending.delete(id);
+        reject(isAccountCapability(action) ? error('原生请求发送未确认，请勿盲目重试', 1500) : error('Failed to send native action'));
       });
     });
   }

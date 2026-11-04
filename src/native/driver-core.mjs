@@ -22,6 +22,8 @@ import { createSocialActions, SOCIAL_ACTIONS } from './social-actions.mjs';
 import { createGroupContent, GROUP_CONTENT_ACTIONS } from './group-content.mjs';
 import { createExtendedActions, EXTENDED_ACTIONS } from './extended-actions.mjs';
 import {createVideoPreparer} from './video.mjs';
+import { PROFILE_ACTIONS, QZONE_ACTIONS } from '../account-capabilities.mjs';
+import { createSelfCapabilities } from './self-capabilities.mjs';
 import {pokeNotices} from './poke.mjs';
 
 const failure = (message, retcode = 1503) => Object.assign(new Error(message), { retcode });
@@ -61,6 +63,7 @@ export function createDriverCore({
   allowedGroups, allowedUsers, loginUin = '', experimentalRichMedia = false, createSession = createLinuxSession, createIndex = createMessageIndex, persistSelectedAccount = async () => {},
   connectionTimeoutMs = 10000, qrTimeoutMs = 12000, accountTimeoutMs = 12000, sendTimeoutMs = 12000,
   requestRestart = () => {}, recoveryGraceMs = 15000, forceQr = false, manualRecoveryReason = '',
+  enableProfileActions = false, enableQzoneCredentials = false,
   platformConfig = { type: 3, appId: metadata?.appid?.linux, qua: 'V1_LNX_NQ_3.2.34_53644_GW_B', osName: 'Linux' },
 }) {
   if (typeof prepareProfile !== 'function') throw new TypeError('prepareProfile is required.');
@@ -128,6 +131,8 @@ export function createDriverCore({
   }
   const friendActions=createFriendActions({getContext:privateContext,allowedUsers:userAllow,timeoutMs:Math.min(accountTimeoutMs,8000)});
   const privateActions=createPrivateActions({getContext:privateContext,timeoutMs:Math.min(accountTimeoutMs,8000)});
+  const selfCapabilities = createSelfCapabilities({ getContext: privateContext, profile, enableProfileActions,
+    enableQzoneCredentials, timeoutMs: Math.min(accountTimeoutMs, 8000) });
   function managementContext(){
     const c=privateContext();
     return {...c,groups:()=>session.getGroups(),check(group){c.check();if(group!==undefined&&(!groupListObserved||!membership.has(group)||allow&&!allow.has(group)))throw failure('Management group is unavailable or outside the allowlist.',1403);}};
@@ -533,7 +538,7 @@ export function createDriverCore({
     if (login.connect() === false) throw failure('QQ native login transport refused to connect.');
   }
   return {
-    actions: Object.freeze(['get_login_qrcode', 'get_login_state', 'get_login_info', 'get_group_list', 'send_group_msg', 'upload_group_file', 'delete_msg', 'get_file', 'get_record', 'convert_record', 'get_msg', 'get_group_msg_history', 'get_group_member_list', 'get_group_member_info', 'get_friend_list', 'get_friend_info', 'get_stranger_info', 'send_private_msg', 'send_msg', 'get_friend_msg_history', 'get_private_msg_history', 'upload_private_file',...GROUP_MANAGEMENT_ACTIONS,...SOCIAL_ACTIONS,...GROUP_CONTENT_ACTIONS,...EXTENDED_ACTIONS]), status,
+    actions: Object.freeze(['get_login_qrcode', 'get_login_state', 'get_login_info', 'get_group_list', 'send_group_msg', 'upload_group_file', 'delete_msg', 'get_file', 'get_record', 'convert_record', 'get_msg', 'get_group_msg_history', 'get_group_member_list', 'get_group_member_info', 'get_friend_list', 'get_friend_info', 'get_stranger_info', 'send_private_msg', 'send_msg', 'get_friend_msg_history', 'get_private_msg_history', 'upload_private_file',...GROUP_MANAGEMENT_ACTIONS,...SOCIAL_ACTIONS,...GROUP_CONTENT_ACTIONS,...EXTENDED_ACTIONS,...PROFILE_ACTIONS,...QZONE_ACTIONS]), status,
     start() {
       if (stopped) return Promise.reject(failure('QQ native driver is stopped.'));
       if (!startPromise) startPromise = startNative().catch(error => { loginFailed = true; stage = 'start_failed'; notify(); throw error; });
@@ -543,6 +548,7 @@ export function createDriverCore({
       if (stopped) throw failure('QQ native driver is stopped.');
       if (!params || typeof params !== 'object' || Array.isArray(params)) throw failure('Action parameters must be an object.', 1400);
       const account = flow.snapshot();
+      if (PROFILE_ACTIONS.includes(action) || QZONE_ACTIONS.includes(action)) return selfCapabilities.call(action, params);
       if (action === 'get_login_state') return {
         ...account, ...status(), session: sessionState(), last_event: lastEvent, qq_version: metadata.version,
         qr_failure: qrFailure, saved_selection_error: selectionSaveFailed, media_downloads: receivedMedia.status(), audio: audio.status(),
@@ -568,6 +574,7 @@ export function createDriverCore({
         action=type==='group'?'send_group_msg':'send_private_msg';
       }
       if(action==='get_friend_list')return friendActions.list();
+      if (action === 'get_stranger_info' && selectedAccount && String(params.user_id) === selectedAccount.uin) return selfCapabilities.selfInfo(params);
       if(action==='get_friend_info'||action==='get_stranger_info')return friendActions.info(params.user_id);
       if(action==='get_friend_msg_history'||action==='get_private_msg_history')return privateActions.call(action,params);
       if(action==='get_msg'&&mapper?.lookup(messageAlias(params.message_id))?.chatType===1)return privateActions.call(action,params);
@@ -690,7 +697,7 @@ export function createDriverCore({
     stop() {
       if (stopPromise) return stopPromise;
       stopped = true; transportConnected = false; stage = 'stopped'; generation++;
-      recovery.stop(); mediaStore.close(); noticeMapper?.close(); friendActions.close(); privateActions.close(); groupManagement.close();socialActions.close();groupContent.close();extendedActions.close();video.close();flow.stop(); accountActions.close(); contextActions.close(); audio.close(); cancelRememberedRead?.(); rejectPending(failure('QQ native driver stopped.'));
+      recovery.stop(); selfCapabilities.close(); mediaStore.close(); noticeMapper?.close(); friendActions.close(); privateActions.close(); groupManagement.close();socialActions.close();groupContent.close();extendedActions.close();video.close();flow.stop(); accountActions.close(); contextActions.close(); audio.close(); cancelRememberedRead?.(); rejectPending(failure('QQ native driver stopped.'));
       clearImmediate(sessionStartHandle); sessionStartHandle = null;
       stopPromise = (async () => {
         try { await selectionWrite; } catch {}

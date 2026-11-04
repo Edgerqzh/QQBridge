@@ -85,6 +85,7 @@ async function fixture(t, options = {}) {
     connectionTimeoutMs: 80, qrTimeoutMs: 80, accountTimeoutMs: 80, sendTimeoutMs: options.sendTimeoutMs ?? 80,
     requestRestart: options.requestRestart, recoveryGraceMs: options.recoveryGraceMs, forceQr: options.forceQr,
     platformConfig: options.platformConfig,
+    enableProfileActions: options.enableProfileActions, enableQzoneCredentials: options.enableQzoneCredentials,
     createSession(value) {
       calls.push(['create-session', value.account]); sessionOptions = value;
       const state = { session_ready: false, online: false, good: false };
@@ -100,7 +101,7 @@ async function fixture(t, options = {}) {
           return { ...state, online: state.forcedOffline ? false : online, good: state.forcedOffline ? false : online };
         },
         authenticationEvidence: () => value.getAuthenticationEvidence(),
-        getServices: () => ({ msgService, groupService, buddyService: options.buddyService??(options.friendList ? {getBuddyList(){value.onFriendList(options.friendList);return {result:0};}} : undefined),addBuddyService:options.addBuddyService }),
+        getServices: () => ({ session: options.nativeSession, msgService, groupService, buddyService: options.buddyService??(options.friendList ? {getBuddyList(){value.onFriendList(options.friendList);return {result:0};}} : undefined),addBuddyService:options.addBuddyService }),
         getGroups:()=>options.groups??groups,
         online() { Object.assign(state, { forcedOffline: false, session_ready: true, online: true, good: true, online_message_observed: true, msf_status: 1, msf_error: 0 }); value.onState({ ...state }); },
         offline() { Object.assign(state, { forcedOffline: true, online: false, good: false, msf_status: 0 }); value.onState({ ...state }); },
@@ -715,4 +716,31 @@ test('Windows shutdown does not abort a QR session already consumed by account l
   assert.equal(consumed.sessions.length, 0);
   await consumed.driver.stop();
   assert.equal(consumed.calls.filter(x => x[0] === 'abort-polling').length, 0);
+});
+
+test('self profile lookup bypasses only the own-account friend restriction; other targets and closed gates stay restricted', async t => {
+  const ownInfo = new Map([[account.uid, { uid: account.uid, uin: account.uin, coreInfo: { nick: 'Own profile' } }]]);
+  const nativeSession = { getProfileService: () => ({ getCoreAndBaseInfo: () => ownInfo }) };
+  const options = { enableProfileActions: true, nativeSession, allowedUsers: new Set(['987654321']), friendList: [] };
+  const f = await fixture(t, options); await f.select(); await f.online();
+  assert.deepEqual(await f.driver.call('get_stranger_info', { user_id: account.uin }), { user_id: Number(account.uin), nickname: 'Own profile', nick: 'Own profile' });
+  await assert.rejects(f.driver.call('get_stranger_info', { user_id: '987654321' }), { retcode: 1403 });
+  await assert.rejects(f.driver.call('get_friend_info', { user_id: account.uin }), { retcode: 1403 });
+  const closed = await fixture(t, { ...options, enableProfileActions: false }); await closed.select(); await closed.online();
+  await assert.rejects(closed.driver.call('get_stranger_info', { user_id: account.uin }), { retcode: 1404 });
+});
+
+test('new capabilities are registered with closed gates and dispatch through the independent enabled services', async t => {
+  const off = await fixture(t);
+  for (const action of ['set_qq_profile','set_self_longnick','set_qq_avatar','set_online_status','get_cookies','get_credentials']) {
+    assert.ok(off.driver.actions.includes(action)); await assert.rejects(off.driver.call(action, {}), { retcode: 1404 });
+  }
+  const calls = [];
+  const on = await fixture(t, { enableProfileActions: true, enableQzoneCredentials: true, nativeSession: {
+    getProfileService: () => ({ setLongNick(value) { calls.push(value); return { result: 0 }; } }),
+    getTipOffService: () => ({ getPskey() { return { result: 0, domainPskeyMap: new Map([['qzone.qq.com','fixture']]) }; } }),
+  } }); await on.select(); await on.online();
+  assert.deepEqual(await on.driver.call('set_qq_profile', { personal_note: '' }), {}); assert.deepEqual(calls, ['']);
+  assert.ok((await on.driver.call('get_cookies', { domain: 'qzone.qq.com' })).cookies.endsWith('p_skey=fixture'));
+  await assert.rejects(on.driver.call('get_csrf_token', {}), { retcode: 1404 });
 });

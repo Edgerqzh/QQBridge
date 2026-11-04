@@ -6,6 +6,8 @@
 
 Windows 原生适配正在验收：已在不使用 Docker 的进程中验证扫码、免扫码恢复、基础私聊与群消息、图片及撤回。独立构建不包含 QQ 客户端；完整验收状态、固定版本和启动方式见 [Windows 运行说明](docs/WINDOWS.md)。长时间稳定性、整机重启及干净系统测试尚不能视为通过。
 
+新增的默认关闭能力见 [QQ 资料与空间凭证动作](docs/PROFILE_QZONE.md)：当前账号资料查询、昵称／签名／头像／状态修改，以及限定空间域名的凭证读取。两个开关独立设置，完整限制与真机验证状态见该文档。
+
 文本版已验证真实扫码、群消息收发和 OneBot WebSocket 推送。新增图片、文件、语音、提及与撤回处于显式启用的实验阶段。0.3 增加 [主动下载与语音转码](docs/DOWNLOAD_AUDIO.md)、[本地扫码登录网页](docs/LOGIN_WEB.md)，0.4 增加 [引用回复、消息查询、历史、群成员与 ID 持久化](docs/CONTEXT.md)。0.5 增加 [撤回通知、成员事件与掉线恢复](docs/EVENTS_RECOVERY.md)。0.6 增加 [好友私聊收发、查询、媒体与撤回](docs/PRIVATE.md)。0.7 增加 [好友申请与群管理](docs/MANAGEMENT.md)。0.8 增加 [群申请、公告、转让 / 解散与扩展消息](docs/EXTENDED.md)。详细覆盖见各阶段验证记录。
 
 普通 QQ 账号接入的独立开发 MVP：使用指定 Linux QQ 客户端的原生能力，对外提供部分 OneBot 11 HTTP / WebSocket 接口，供 AI 应用接入。
