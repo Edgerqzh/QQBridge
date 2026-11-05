@@ -50,7 +50,9 @@ async function socialFixture(t,options={}){
   const calls=[],events=[];let valid=true,snapshot={unreadNums:1,buddyReqs:[{friendUid:target.uid,reqTime:String(Math.floor(Date.now()/1000)),isDecide:false,isInitiator:false,isDoubt:false,reqType:1,extWords:'Fixture request'}]},social;
   const services={groupService:{getUinByUids:async ids=>({errCode:0,uins:new Map(ids.map(id=>[id,target.uin]))})},buddyService:{getBuddyReq(){social.receive(snapshot);return {result:0};},approvalFriendRequest(p){calls.push(['approve',p]);return {result:0};},reqToAddFriends(p){calls.push(['add',p]);return {result:0};}},addBuddyService:{requestInfoByAccount:async()=>({result:0,rsp:{targetInfo:{...target}}}),getBuddySetting:async()=>({result:0,rsp:{result:0,errorCode:0,querySetting:1,question:[],targetInfo:{...target}}})}};
   const getContext=()=>({account:own,services,friends:{load:async()=>{},lookup:()=>null},check(){if(!valid)throw Object.assign(Error('session'),{retcode:1503});}});
-  social=createSocialActions({getContext,profile,emitEvent:e=>events.push(e),timeoutMs:50,allowedUsers:options.allowedUsers});t.after(()=>social.close());
+  // Journal reads/writes need a scheduling budget under parallel image/codec tests.
+  // Timeout-specific tests below still opt into a short deadline.
+  social=createSocialActions({getContext,profile,emitEvent:e=>events.push(e),timeoutMs:options.timeoutMs??1000,allowedUsers:options.allowedUsers});t.after(()=>social.close());
   return {social,calls,events,services,profile,getContext,setValid:v=>valid=v,setSnapshot:v=>snapshot=v,snapshot:()=>snapshot};
 }
 test('real-shaped requests emit deduplicated OneBot events and stable opaque flags',async t=>{
@@ -83,7 +85,7 @@ test('mismatched target, unsupported question policy and whitelist prevent outgo
   const g=await socialFixture(t,{allowedUsers:new Set()});await assert.rejects(g.social.call('add_friend',{user_id:target.uin}),reject(1403));assert.equal(g.calls.length,0);
 });
 test('lost friend refresh acknowledgement keeps the native slot occupied',async t=>{
-  const f=await socialFixture(t);f.services.buddyService.getBuddyReq=()=>new Promise(()=>{});await assert.rejects(f.social.call('get_friend_requests',{}),reject(1504));await assert.rejects(f.social.call('get_friend_requests',{}),reject(1429));assert.equal(f.social.status().native_pending,true);
+  const f=await socialFixture(t,{timeoutMs:50});f.services.buddyService.getBuddyReq=()=>new Promise(()=>{});await assert.rejects(f.social.call('get_friend_requests',{}),reject(1504));await assert.rejects(f.social.call('get_friend_requests',{}),reject(1429));assert.equal(f.social.status().native_pending,true);
 });
 
 test('an already-dispatched timed-out mutation stays locked until native settlement',async()=>{

@@ -43,6 +43,23 @@ test('disconnected bridge refuses actions instead of inventing QQ results', asyn
   await assert.rejects(backend.call('send_group_msg', {}), { retcode: 1503 });
 });
 
+test('account mutation IPC deadline and disconnect report uncertain outcome without replay', async t => {
+  const { backend, url } = await setup(t, { callTimeoutMs: 15 });
+  let calls = 0, entered;
+  let started = new Promise(resolve => { entered = resolve; });
+  const runtime = await connectRuntime({ url, token, createDriver: async () => ({
+    actions: ['set_self_longnick'], start: async () => {}, stop: async () => {},
+    status: () => ({ online: true, good: true, self_id: 12345 }),
+    call() { calls++; entered(); return new Promise(() => {}); },
+  }) }); t.after(() => runtime.stop());
+  await assert.rejects(backend.call('set_self_longnick', { longNick: 'fixture' }), e => e.retcode === 1500 && /未确认/.test(e.message));
+  assert.equal(calls, 1);
+  started = new Promise(resolve => { entered = resolve; });
+  const pending = backend.call('set_self_longnick', { longNick: '' });
+  const rejected = assert.rejects(pending, e => e.retcode === 1500 && /未确认/.test(e.message));
+  await started; await runtime.stop(); await rejected; assert.equal(calls, 2);
+});
+
 test('internal bridge rejects missing authentication and browser origin', async t => {
   const { url } = await setup(t);
   for (const headers of [{}, { Authorization: `Bearer ${token}`, Origin: 'https://example.com' }]) {

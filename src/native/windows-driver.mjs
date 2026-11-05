@@ -56,6 +56,8 @@ export async function createDriver({ emitEvent, emitStatus, requestRestart }) {
     forceQr: process.env.QQBRIDGE_FORCE_QR === '1', manualRecoveryReason: process.env.QQBRIDGE_RECOVERY_MANUAL || '',
     allowedGroups: parseAllowedGroups(process.env.QQBRIDGE_ALLOWED_GROUPS), allowedUsers: parseAllowedGroups(process.env.QQBRIDGE_ALLOWED_USERS, 'QQBRIDGE_ALLOWED_USERS'),
     experimentalRichMedia: process.env.QQBRIDGE_EXPERIMENTAL_RICH_MEDIA === '1',
+    enableProfileActions: process.env.QQBRIDGE_ENABLE_PROFILE_ACTIONS === '1',
+    enableQzoneCredentials: process.env.QQBRIDGE_ENABLE_QZONE_CREDENTIALS === '1',
     persistSelectedAccount: uin => saveSelectedLogin(profile, uin),
     async prepareProfile() {
       await mkdir(profile, { recursive: true, mode: 0o700 });
