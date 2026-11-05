@@ -2,7 +2,6 @@ import { mkdir, mkdtemp, writeFile, unlink, rmdir } from 'node:fs/promises';
 import path from 'node:path';
 import { PROFILE_ACTIONS, QZONE_ACTIONS } from '../account-capabilities.mjs';
 import { createImageWorker } from './image-worker-client.mjs';
-import { imageInfo } from './media.mjs';
 
 const safeErrors = new WeakSet();
 function fail(retcode, message) {
@@ -38,15 +37,13 @@ function onlineStatus(p) {
   return { status, extStatus: ext_status, batteryStatus: battery_status };
 }
 function avatarBytes(file) {
-  if (typeof file !== 'string' || !file.startsWith('base64://')) throw fail(1400, '头像只接受 Base64 图片');
-  const data = file.slice(9), limit = 4 * 1024 * 1024;
-  if (!data || data.length > Math.ceil(limit / 3) * 4 || data.length % 4 || !/^[A-Za-z0-9+/]*={0,2}$/.test(data)) throw fail(1400, '头像编码或大小不正确');
+  const formats = '头像仅支持 PNG、JPEG、GIF、WebP';
+  if (typeof file !== 'string' || !file.startsWith('base64://')) throw fail(1400, formats + '，且必须使用 base64:// 编码');
+  const data = file.slice(9), limit = 6 * 1024 * 1024;
+  if (!data || data.length > Math.ceil(limit / 3) * 4 || data.length % 4 || !/^[A-Za-z0-9+/]*={0,2}$/.test(data)) throw fail(1400, formats + '，编码须规范且不超过 6 MiB');
   const bytes = Buffer.from(data, 'base64');
-  if (!bytes.length || bytes.length > limit || bytes.toString('base64') !== data) throw fail(1400, '头像编码或大小不正确');
-  let info;
-  try { info = imageInfo(bytes); } catch { throw fail(1400, '头像必须是完整的 PNG 或 JPEG 图片'); }
-  if (!Number.isInteger(info.width) || !Number.isInteger(info.height) || info.width < 1 || info.height < 1 || info.width > 4096 || info.height > 4096 || info.width * info.height > 16777216) throw fail(1400, '头像像素超过允许范围');
-  return { bytes, info };
+  if (!bytes.length || bytes.length > limit || bytes.toString('base64') !== data) throw fail(1400, formats + '，编码须规范且不超过 6 MiB');
+  return bytes;
 }
 function ack(result, partial = false) {
   if (result?.result === 0) return;
@@ -126,20 +123,20 @@ export function createSelfCapabilities({ getContext, profile, enableProfileActio
             const result = await op.invoke(() => c.services.msgService.setStatus(status)); op.check(); c.check(); ack(result);
           } else {
             const setHeader = method(c, 'getProfileService', 'setHeader');
-            let directory;
+            let directory, file;
             try {
-              let decoded;
-              try { decoded = await images.inspect(avatar.bytes); } catch { throw fail(1400, '头像图片不完整或无法解码'); }
+              let converted;
+              try { converted = await images.prepareAvatar(avatar); } catch { throw fail(1400, '头像仅支持 PNG、JPEG、GIF、WebP，图片须完整且不超过 4000 万像素'); }
               op.check(); c.check();
-              if (decoded.width !== avatar.info.width || decoded.height !== avatar.info.height) throw fail(1400, '头像图片尺寸不一致');
               const parent = path.join(profile, 'tmp', 'avatars'); await mkdir(parent, { recursive: true, mode: 0o700 }); op.check(); c.check();
               directory = await mkdtemp(path.join(parent, 'upload-'));
-              const file = path.join(directory, 'avatar.' + avatar.info.extension);
-              await writeFile(file, avatar.bytes, { flag: 'wx', mode: 0o600 }); op.check(); c.check();
+              file = path.join(directory, 'avatar.' + converted.extension);
+              await writeFile(file, converted.bytes, { flag: 'wx', mode: 0o600 }); op.check(); c.check();
               const result = await op.invoke(() => setHeader(file)); op.check(); c.check(); ack(result);
             } finally {
               // Wait for the native promise to settle before deleting its input, even after caller timeout.
-              if (directory) { await unlink(path.join(directory, 'avatar.' + avatar.info.extension)).catch(() => {}); await rmdir(directory).catch(() => {}); }
+              if (file) await unlink(file).catch(() => {});
+              if (directory) await rmdir(directory).catch(() => {});
             }
           }
           return {};

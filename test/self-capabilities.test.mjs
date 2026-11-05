@@ -129,13 +129,14 @@ test('post-dispatch timeout is 1500 with exactly one call; read-only preflight t
   const read=deferred();const g=await fixture(t,{timeoutMs:8,profileService:{getCoreAndBaseInfo(){return read.promise;}}});
   await rejected(g.service.selfInfo({user_id:account.uin}),1504);read.resolve(new Map());assert.deepEqual(g.calls,[]);
 });
-test('avatar accepts only canonical bounded PNG/JPEG and verifies complete decoding before native dispatch',async t=>{
-  const f=await fixture(t);const png=await sharp({create:{width:32,height:32,channels:3,background:'#4466aa'}}).png().toBuffer();
+test('avatar requires canonical bounded image data and dispatches a normalized file after complete decoding',async t=>{
+  const f=await fixture(t,{timeoutMs:8000});const png=await sharp({create:{width:32,height:32,channels:3,background:'#4466aa'}}).png().toBuffer();
   assert.deepEqual(await f.service.call('set_qq_avatar',{file:asFile(png)}),{});assert.equal(f.calls.length,1);
   await assert.rejects(readFile(f.calls[0][1]),{code:'ENOENT'});
-  const huge=await sharp({create:{width:5000,height:1,channels:3,background:'blue'}}).png().toBuffer();
   const jpeg=await sharp(png).jpeg().toBuffer();
-  for(const file of ['https://example.com/avatar.png','C:\\private\\avatar.png','file:///avatar','base64://','base64://Zh==','base64://AA A=','base64://'+'A'.repeat(5592412),asFile(Buffer.from('GIF89a invalid')),asFile(huge),asFile(jpeg.subarray(0,40)),asFile(png.subarray(0,28))]) await rejected(f.service.call('set_qq_avatar',{file}),1400);
+  for(const file of ['https://example.com/avatar.png','C:\\private\\avatar.png','file:///avatar','base64://','base64://Zh==','base64://AA A=','base64://'+'A'.repeat(8388612),asFile(Buffer.from('GIF89a invalid')),asFile(jpeg.subarray(0,40)),asFile(png.subarray(0,28))]) {
+    await assert.rejects(f.service.call('set_qq_avatar',{file}),e=>e.retcode===1400 && ['PNG','JPEG','GIF','WebP'].every(format=>e.message.includes(format)));
+  }
   assert.equal(f.calls.length,1);
   assert.deepEqual(await f.service.call('set_qq_avatar',{file:asFile(jpeg)}),{});assert.equal(f.calls.length,2);
 });
@@ -145,7 +146,8 @@ test('avatar preflight deadline prevents a later native write; a timed-out dispa
   await new Promise(r=>setTimeout(r,180));assert.deepEqual(before.calls,[]);
   const wait=deferred();let sentFile;
   const after=await fixture(t,{timeoutMs:1500,profileService:{setHeader(file){sentFile=file;return wait.promise;}}});
-  await rejected(after.service.call('set_qq_avatar',{file:asFile(png)}),1500);assert.ok(sentFile);assert.ok((await readFile(sentFile)).equals(png));
+  await rejected(after.service.call('set_qq_avatar',{file:asFile(png)}),1500);assert.ok(sentFile);
+  assert.equal((await sharp(await readFile(sentFile)).metadata()).format,'jpeg');
   wait.resolve({result:0});await new Promise(r=>setTimeout(r,30));await assert.rejects(readFile(sentFile),{code:'ENOENT'});
 });
 test('session loss and close never deliver stale credentials or dispatch a delayed write',async t=>{
