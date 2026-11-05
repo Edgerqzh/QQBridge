@@ -2,7 +2,7 @@
 
 公开源码：[Edgerqzh/QQBridge](https://github.com/Edgerqzh/QQBridge)。原创代码使用 MIT 许可。
 
-最新发布：[v0.10.0](https://github.com/Edgerqzh/QQBridge/releases/tag/v0.10.0)，提供 Windows x64 压缩包、SHA-256 校验文件和许可证。包内包含 Node 运行时，QQ 客户端另行准备。第三方组件许可见 [许可证说明](THIRD-PARTY-NOTICES.md)。
+最新发布：[v0.11.0](https://github.com/Edgerqzh/QQBridge/releases/tag/v0.11.0)，提供 Windows x64 压缩包、SHA-256 校验文件和许可证。包内包含 Node 运行时，QQ 客户端另行准备。第三方组件许可见 [许可证说明](THIRD-PARTY-NOTICES.md)。
 
 Windows 原生适配正在验收：已在不使用 Docker 的进程中验证扫码、免扫码恢复、基础私聊与群消息、图片及撤回。独立构建不包含 QQ 客户端；完整验收状态、固定版本和启动方式见 [Windows 运行说明](docs/WINDOWS.md)。长时间稳定性、整机重启及干净系统测试尚不能视为通过。
 

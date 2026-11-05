@@ -2,7 +2,7 @@
 
 当前 Windows 适配处于开发验收阶段，目标平台为 Windows 10 / 11 x64，不依赖 Docker 或 WSL。它与 Linux 版使用同一网关、OneBot 接口、登录接口和业务逻辑，另行提供 Windows 原生模块加载及进程托管。
 
-下载：[v0.10.0 Release](https://github.com/Edgerqzh/QQBridge/releases/tag/v0.10.0)。Windows 文件名为 `qqbridge-windows-x64-0.10.0.zip`，摘要见同页 `SHA256SUMS.txt`。项目 MIT 许可证、Node 和 npm 依赖的许可及图像库通知均随包保留；也提供独立许可证包。发布版本不代表下列待验收项目已经通过。
+下载：[v0.11.0 Release](https://github.com/Edgerqzh/QQBridge/releases/tag/v0.11.0)。Windows 文件名为 `qqbridge-windows-x64-0.11.0.zip`，摘要见同页 `SHA256SUMS.txt`。项目 MIT 许可证、Node 和 npm 依赖的许可及图像库通知均随包保留；也提供独立许可证包。发布版本不代表下列待验收项目已经通过。
 
 ## 固定依赖
 
@@ -85,7 +85,7 @@
 | 两个机器人账号同时运行、睡眠唤醒 | 尚未完整验收 |
 | Defender | 当前执行环境无法取得 Defender 状态，尚未完成扫描验收；未修改安全设置 |
 
-自动化回归共 259 项：Windows 通过 257 项，因缺少 FFmpeg / ffprobe 跳过 2 项；Linux 隔离容器 259 项全部通过。图片工作进程、语音编解码、故障后的资源释放及原有网关功能均在这轮测试范围内。测试容器不连接真实账号。
+自动化回归共 284 项：Windows 通过 282 项，因缺少 FFmpeg / ffprobe 跳过 2 项；此前 Linux 隔离容器 259 项全部通过（不含新增动作）。图片工作进程、语音编解码、故障后的资源释放及原有网关功能均在这轮测试范围内。测试容器不连接真实账号。
 
 真实打包版的异常恢复、退出和重启验证不发送聊天消息。以上结果覆盖当前开发机与固定依赖组合，不代表已完成整机重启、24 小时在线或干净系统验收。
 

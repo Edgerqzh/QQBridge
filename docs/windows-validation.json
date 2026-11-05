@@ -1,5 +1,5 @@
 {
-  "version": "0.10.0",
+  "version": "0.11.0",
   "qualification": "development-validation-in-progress",
   "host_integration": {
     "source_build_passed": true,
@@ -21,12 +21,13 @@
     "restart_recovers_same_account_without_scan": true,
     "previous_message_id_remains_queryable": true,
     "user_confirmed_main_qq_remains_online": true,
-    "social_sends_during_recovery_tests": 0
+    "social_sends_during_recovery_tests": 0,
+    "validated_version": "0.10.0"
   },
   "automated_regression": {
     "windows": {
-      "tests": 259,
-      "passed": 257,
+      "tests": 284,
+      "passed": 282,
       "skipped": 2,
       "failed": 0,
       "skipped_reason": "FFmpeg / ffprobe unavailable"
@@ -48,5 +49,19 @@
   ],
   "deferred_by_user": [
     "Windows operating-system reboot with remembered login"
-  ]
+  ],
+  "opt_in_capabilities": {
+    "profile_actions_default_enabled": false,
+    "qzone_credentials_default_enabled": false,
+    "self_lookup_live_verified": true,
+    "signature_live_verified": true,
+    "nickname_live_verified": true,
+    "png_avatar_live_verified": true,
+    "webp_avatar_live_verified": true,
+    "online_status_live_verified": true,
+    "personal_note_only_live_result": "unconfirmed_not_retried",
+    "qzone_credentials_live_verified": true,
+    "standard_skey_available": false,
+    "credential_values_in_release": false
+  }
 }
